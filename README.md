@@ -4,12 +4,15 @@
 
 <p align="center">
 A quiet macOS app for learning French vocabulary — flashcards, spaced repetition and forgetting curves.<br>
-一款安静的 macOS 法语背词软件：闪卡、间隔复习与遗忘曲线。
+一款安静的 macOS 法语背词软件：闪卡、间隔复习与遗忘曲线。<br>
+Une app macOS paisible pour apprendre le vocabulaire français — cartes, répétition espacée et courbes de l’oubli.
 </p>
 
 <p align="center"><a href="../../releases/latest">Download for macOS</a> · macOS 14+ · Apple silicon & Intel</p>
 
 ![Home](docs/home.png)
+
+[中文](#中文) · [Français](#français) · [English](#english)
 
 *Lexikos* comes from Greek λεξικός, "of words" — the root of *lexicon*. The icon: an open book with a word rising from it, circled by the orbit of review.
 
@@ -65,6 +68,48 @@ A quiet macOS app for learning French vocabulary — flashcards, spaced repetiti
 
 ---
 
+## Français
+
+### À quoi sert Lexikos
+
+- **Les nombres en français** : exercice intégré de 0 à 9999, en quatre niveaux (0–10, 11–99, 100–999, 1000–9999). Un clic révèle l’orthographe et l’API, par ex. `71 → soixante et onze /swa.sɑ̃.te.ɔ̃z/`.
+- **Importer n’importe quel paquet** : Anki `.apkg` et CSV / TSV / TXT. Les champs Anki sont reconnus d’après leur nom et le modèle de carte (mot, sens, nature, API, phrase d’exemple et traduction), quel que soit leur ordre ; les numéros et l’audio sont ignorés.
+- **L’essentiel d’abord** : la carte montre le mot et une ligne de sens. Les notes longues se rangent dans un panneau repliable : Exemples / Usage / Expressions / Vocabulaire lié / Grammaire, chaque phrase française avec sa traduction en dessous.
+- **Lecture à voix haute** : lecture automatique à la révélation ; chaque exemple se lit seul (le français uniquement). Le mode lent divise la vitesse par deux sans changer la hauteur de la voix.
+- **Répétition espacée** : notez chaque carte Oublié / Flou / Su ; chaque bouton indique quand la carte reviendra. Un mot nouveau s’affiche d’abord avec sa réponse, puis revient quelques cartes plus loin pour un vrai test.
+- **Programme du jour** : les révisions dues plus un nombre de mots nouveaux par jour (5 à 50, ou personnalisé). Choisissez un paquet sur l’accueil et commencez.
+- **Courbes de l’oubli** : statistiques par paquet — votre rétention moyenne comparée aux données d’Ebbinghaus (1885), prévision des révisions sur 14 jours, liste des mots triée par rétention ; cliquez un mot pour voir sa propre courbe en dents de scie et tout son historique.
+- **Interface** : chinois / anglais / français, clair / sombre / système, six couleurs d’accent, s’adapte à la taille de la fenêtre.
+
+### Planification
+
+Chaque carte a une stabilité S en jours. Le souvenir suit une courbe de l’oubli en loi de puissance R(t) = 1 / (1 + t / 9S) : S est donc exactement le temps au bout duquel le souvenir tombe à 90 %, moment où la carte est due. Le tableau de la section chinoise montre comment chaque note modifie S ; des « Su » successifs donnent des intervalles d’environ 2,5 → 6 → 13 → 30 → 70 jours. Une carte avec S ≥ 21 jours est considérée comme maîtrisée.
+
+### Installation
+
+Téléchargez `Lexikos-<version>.dmg` depuis [Releases](../../releases/latest), ouvrez-le et glissez Lexikos dans Applications.
+
+### Raccourcis
+
+| Touche | Action |
+| --- | --- |
+| Espace / Entrée | Révéler / suivant / « Compris » |
+| 1 · 2 · 3 | Oublié · Flou · Su |
+| D | Afficher / masquer les notes |
+| S · A | Écouter · écouter lentement |
+| → | Passer |
+| Échap | Retour |
+
+### Mises à jour
+
+Quand une nouvelle version paraît, un bandeau sur l’accueil propose *Mettre à jour*. L’app téléchargée n’est installée que si sa signature est valide et provient de la même équipe Developer ID (BGM8P5U985). Placez d’abord Lexikos dans le dossier Applications.
+
+### Données et confidentialité
+
+Tout reste sur votre Mac dans `~/Library/Application Support/Lexikos/` (`decks/`, `progress/`). Aucun compte, aucune télémétrie. La seule requête réseau est la vérification des mises à jour sur GitHub Releases, au plus toutes les 12 heures ; elle peut être désactivée dans les Réglages.
+
+---
+
 ## English
 
 ### What it does
@@ -80,7 +125,7 @@ A quiet macOS app for learning French vocabulary — flashcards, spaced repetiti
 
 ### Scheduling
 
-Each card has a stability S in days. Recall follows a power forgetting curve R(t) = 1 / (1 + t / 9S), so S is exactly the time until recall falls to 90 %, which is when the card is due. See the table above for how each rating updates S; consecutive "Knew it" gives intervals of roughly 2.5 → 6 → 13 → 30 → 70 days. Cards with S ≥ 21 days count as mastered.
+Each card has a stability S in days. Recall follows a power forgetting curve R(t) = 1 / (1 + t / 9S), so S is exactly the time until recall falls to 90 %, which is when the card is due. See the table in the Chinese section for how each rating updates S; consecutive "Knew it" gives intervals of roughly 2.5 → 6 → 13 → 30 → 70 days. Cards with S ≥ 21 days count as mastered.
 
 ### Install
 

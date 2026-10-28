@@ -19,5 +19,5 @@ if xcrun notarytool history --keychain-profile "$PROFILE" >/dev/null 2>&1; then
 else
     echo "warning: no notarytool profile '$PROFILE'; $DMG is signed but not notarized" >&2
 fi
-shasum -a 256 "$DMG" > "$DMG.sha256"
+(cd dist && shasum -a 256 "Lexikos-$VERSION.dmg" > "Lexikos-$VERSION.dmg.sha256")
 echo "$DMG"
