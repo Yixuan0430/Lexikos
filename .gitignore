@@ -4,3 +4,4 @@ dist/
 *.dmg
 .DS_Store
 .swiftpm/
+Lexikos.xcodeproj/

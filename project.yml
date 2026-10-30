@@ -1,0 +1,54 @@
+name: Lexikos
+options:
+  bundleIdPrefix: com.yixuanwu
+  deploymentTarget: { macOS: "14.0", iOS: "17.0" }
+  createIntermediateGroups: true
+settings:
+  base:
+    DEVELOPMENT_TEAM: BGM8P5U985
+    CODE_SIGN_STYLE: Automatic
+    MARKETING_VERSION: 1.1.0
+    CURRENT_PROJECT_VERSION: 1
+    SWIFT_VERSION: 5.0
+    GENERATE_INFOPLIST_FILE: YES
+    INFOPLIST_KEY_CFBundleDisplayName: Lexikos
+    INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.education
+packages:
+  ZIPFoundation: { url: https://github.com/weichsel/ZIPFoundation.git, exactVersion: 0.9.20 }
+targets:
+  Lexikos-macOS:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/Lexikos
+        excludes: ["iOS/**"]
+      - path: Resources/Lexikos.icns
+        buildPhase: resources
+    dependencies: [{ package: ZIPFoundation }]
+    settings:
+      base:
+        PRODUCT_NAME: Lexikos
+        PRODUCT_BUNDLE_IDENTIFIER: com.yixuanwu.lexikos
+        ENABLE_HARDENED_RUNTIME: YES
+        INFOPLIST_KEY_CFBundleIconFile: Lexikos
+    entitlements:
+      path: Config/Lexikos-macOS.entitlements
+      properties: {}
+  Lexikos-iOS:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources/Lexikos
+        excludes: ["macOS/**"]
+    dependencies: [{ package: ZIPFoundation }]
+    settings:
+      base:
+        PRODUCT_NAME: Lexikos
+        PRODUCT_BUNDLE_IDENTIFIER: com.yixuanwu.lexikos
+        TARGETED_DEVICE_FAMILY: "1,2"
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+    entitlements:
+      path: Config/Lexikos-iOS.entitlements
+      properties: {}

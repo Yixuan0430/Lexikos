@@ -377,9 +377,14 @@ struct PracticeView: View {
     private func noteLine(_ item: CardParts.Item) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             if let fr = item.fr {
-                Button { speaker.say(fr, language: "fr-FR") } label: { Image(systemName: "speaker.wave.1").font(.system(size: 11)) }
+                let speak = Button { speaker.say(fr, language: "fr-FR") } label: { Image(systemName: "speaker.wave.1").font(.system(size: 11)) }
                     .buttonStyle(.plain).focusable(false).foregroundStyle(Color.muted.opacity(0.7))
-                    .simultaneousGesture(TapGesture().modifiers(.option).onEnded { speaker.say(fr, language: "fr-FR", slow: true) })
+                #if os(macOS)
+                speak.simultaneousGesture(TapGesture().modifiers(.option).onEnded { speaker.say(fr, language: "fr-FR", slow: true) })
+                #else
+                // No Option key on a phone: long-press speaks slowly.
+                speak.simultaneousGesture(LongPressGesture().onEnded { _ in speaker.say(fr, language: "fr-FR", slow: true) })
+                #endif
             }
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.fr ?? item.text).font(.system(size: item.fr == nil ? 14 : 15))

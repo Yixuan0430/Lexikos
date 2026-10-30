@@ -3,7 +3,11 @@ import SwiftUI
 // Palette after Synaxos: sage paper neutrals, Didot display, swappable accent.
 extension Color {
     static func dyn(_ light: UInt32, _ dark: UInt32) -> Color {
+        #if os(macOS)
         Color(NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(hex: dark) : NSColor(hex: light) })
+        #else
+        Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: dark) : UIColor(hex: light) })
+        #endif
     }
     static let bg = dyn(0xF3F6F4, 0x121615)
     static let panel = dyn(0xFBFCFB, 0x181D1C)
@@ -12,9 +16,15 @@ extension Color {
     static let line = dyn(0xDDE5E1, 0x2C3533)
 }
 
-extension NSColor {
+#if os(macOS)
+typealias PlatformColor = NSColor
+#else
+typealias PlatformColor = UIColor
+#endif
+
+extension PlatformColor {
     convenience init(hex: UInt32) {
-        self.init(srgbRed: CGFloat(hex >> 16 & 0xFF) / 255, green: CGFloat(hex >> 8 & 0xFF) / 255,
+        self.init(red: CGFloat(hex >> 16 & 0xFF) / 255, green: CGFloat(hex >> 8 & 0xFF) / 255,
                   blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
     }
 }
@@ -57,6 +67,9 @@ enum Accent: String, CaseIterable, Identifiable {
 enum Appearance: String, CaseIterable, Identifiable {
     case system, light, dark
     var id: String { rawValue }
+    var scheme: ColorScheme? { [.system: nil, .light: .light, .dark: .dark][self]! }
+    #if os(macOS)
+    /// Applied app-wide so sheets and menus follow too.
     func apply() {
         NSApp.appearance = switch self {
         case .system: nil
@@ -64,6 +77,7 @@ enum Appearance: String, CaseIterable, Identifiable {
         case .dark: NSAppearance(named: .darkAqua)
         }
     }
+    #endif
 }
 
 enum AppLanguage: String, CaseIterable, Identifiable {

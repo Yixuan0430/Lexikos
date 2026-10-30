@@ -1,5 +1,6 @@
 import Foundation
 import SQLite3
+import ZIPFoundation
 
 struct Card: Codable, Hashable { var front: String; var back: String; var hint: String = "" }
 
@@ -61,10 +62,10 @@ enum Importer {
     static func anki(_ url: URL) throws -> [Card] {
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: tmp) }
-        let unzip = Process()
-        unzip.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
-        unzip.arguments = ["-qq", "-o", url.path, "collection.anki21", "collection.anki2", "collection.anki21b", "-d", tmp.path]
-        try unzip.run(); unzip.waitUntilExit()
+        let archive = try Archive(url: url, accessMode: .read)
+        for name in ["collection.anki21", "collection.anki2", "collection.anki21b"] {
+            if let entry = archive[name] { _ = try archive.extract(entry, to: tmp.appendingPathComponent(name)) }
+        }
 
         let fm = FileManager.default
         let legacy = ["collection.anki21", "collection.anki2"].map { tmp.appendingPathComponent($0) }
