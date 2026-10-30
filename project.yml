@@ -54,12 +54,14 @@ targets:
     sources:
       - path: Sources/Lexikos
         excludes: ["macOS/**"]
+      - Resources/Assets.xcassets
     dependencies: [{ package: ZIPFoundation }, { target: LexikosWidgets-iOS }]
     settings:
       base:
         PRODUCT_NAME: Lexikos
         PRODUCT_BUNDLE_IDENTIFIER: com.yixuanwu.lexikos
         TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
