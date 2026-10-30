@@ -29,6 +29,7 @@ targets:
     info:
       path: Config/Lexikos-macOS-Info.plist
       properties:
+        CFBundleIconFile: Lexikos
         CFBundleURLTypes: [{ CFBundleURLName: com.yixuanwu.lexikos, CFBundleURLSchemes: [lexikos] }]
     settings:
       base:
