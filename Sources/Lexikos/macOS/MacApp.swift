@@ -63,6 +63,7 @@ struct LexikosApp: App {
                 .environment(updater)
                 .task { await updater.checkIfDue() }
                 .cloudSync(decks: store, progress: progress)
+                .widgetFeed(decks: store, progress: progress)
                 .frame(minWidth: 480, minHeight: 520)
                 .onAppear { (Appearance(rawValue: appearance) ?? .system).apply() }
                 .onChange(of: appearance) { (Appearance(rawValue: appearance) ?? .system).apply() }

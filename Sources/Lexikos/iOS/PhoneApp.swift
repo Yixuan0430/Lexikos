@@ -16,6 +16,7 @@ struct LexikosApp: App {
                 .environment(progress)
                 .preferredColorScheme(appearance.scheme)
                 .cloudSync(decks: store, progress: progress)
+                .widgetFeed(decks: store, progress: progress)
         }
     }
 }

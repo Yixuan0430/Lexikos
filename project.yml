@@ -25,7 +25,11 @@ targets:
         excludes: ["iOS/**"]
       - path: Resources/Lexikos.icns
         buildPhase: resources
-    dependencies: [{ package: ZIPFoundation }]
+    dependencies: [{ package: ZIPFoundation }, { target: LexikosWidgets-macOS }]
+    info:
+      path: Config/Lexikos-macOS-Info.plist
+      properties:
+        CFBundleURLTypes: [{ CFBundleURLName: com.yixuanwu.lexikos, CFBundleURLSchemes: [lexikos] }]
     settings:
       base:
         PRODUCT_NAME: Lexikos
@@ -43,13 +47,14 @@ targets:
         com.apple.developer.icloud-services: [CloudKit]
         com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)com.yixuanwu.lexikos
         com.apple.developer.aps-environment: development
+        com.apple.security.application-groups: [BGM8P5U985.com.yixuanwu.lexikos]
   Lexikos-iOS:
     type: application
     platform: iOS
     sources:
       - path: Sources/Lexikos
         excludes: ["macOS/**"]
-    dependencies: [{ package: ZIPFoundation }]
+    dependencies: [{ package: ZIPFoundation }, { target: LexikosWidgets-iOS }]
     settings:
       base:
         PRODUCT_NAME: Lexikos
@@ -62,6 +67,7 @@ targets:
       path: Config/Lexikos-iOS-Info.plist
       properties:
         UIBackgroundModes: [remote-notification]
+        CFBundleURLTypes: [{ CFBundleURLName: com.yixuanwu.lexikos, CFBundleURLSchemes: [lexikos] }]
         LSSupportsOpeningDocumentsInPlace: false
         CFBundleDocumentTypes:
           - CFBundleTypeName: Anki deck
@@ -82,3 +88,45 @@ targets:
         com.apple.developer.icloud-services: [CloudKit]
         com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)com.yixuanwu.lexikos
         aps-environment: development
+        com.apple.security.application-groups: [group.com.yixuanwu.lexikos]
+  # Home-screen / desktop widgets. They read the snapshot the app writes to the shared App Group.
+  LexikosWidgets-iOS:
+    type: app-extension
+    platform: iOS
+    sources: &widgetSources
+      - Sources/Widgets
+      - Sources/Lexikos/WidgetData.swift
+      - Sources/Lexikos/Theme.swift
+    settings:
+      base:
+        PRODUCT_NAME: LexikosWidgets
+        PRODUCT_BUNDLE_IDENTIFIER: com.yixuanwu.lexikos.widgets
+        TARGETED_DEVICE_FAMILY: "1,2"
+        INFOPLIST_KEY_CFBundleDisplayName: Lexikos
+    info:
+      path: Config/LexikosWidgets-iOS-Info.plist
+      properties:
+        NSExtension: { NSExtensionPointIdentifier: com.apple.widgetkit-extension }
+    entitlements:
+      path: Config/LexikosWidgets-iOS.entitlements
+      properties:
+        com.apple.security.application-groups: [group.com.yixuanwu.lexikos]
+  LexikosWidgets-macOS:
+    type: app-extension
+    platform: macOS
+    sources: *widgetSources
+    settings:
+      base:
+        PRODUCT_NAME: LexikosWidgets
+        PRODUCT_BUNDLE_IDENTIFIER: com.yixuanwu.lexikos.widgets
+        ENABLE_HARDENED_RUNTIME: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Lexikos
+    info:
+      path: Config/LexikosWidgets-macOS-Info.plist
+      properties:
+        NSExtension: { NSExtensionPointIdentifier: com.apple.widgetkit-extension }
+    entitlements:
+      path: Config/LexikosWidgets-macOS.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.application-groups: [BGM8P5U985.com.yixuanwu.lexikos]

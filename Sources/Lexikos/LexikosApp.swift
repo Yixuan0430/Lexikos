@@ -121,7 +121,13 @@ struct HomeView: View {
             load(url, into: target)
         }
         // A deck shared to Lexikos from Files, AirDrop, Mail…
-        .onOpenURL { load($0, into: nil) }
+        // …or lexikos://study from a widget.
+        .onOpenURL { url in
+            guard url.scheme == "lexikos" else { return load(url, into: nil) }
+            if url.host == "study", let d = store.decks.first(where: { $0.id.uuidString == startDeck }) ?? store.decks.first {
+                route = .study(d)
+            }
+        }
         .alert(l["import.failed"], isPresented: .constant(error != nil)) {
             Button(l["ok"]) { error = nil }
         } message: { Text(error ?? "") }

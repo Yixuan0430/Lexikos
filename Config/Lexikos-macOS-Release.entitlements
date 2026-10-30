@@ -16,5 +16,9 @@
 	</array>
 	<key>com.apple.developer.ubiquity-kvstore-identifier</key>
 	<string>$(TeamIdentifierPrefix)com.yixuanwu.lexikos</string>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>BGM8P5U985.com.yixuanwu.lexikos</string>
+	</array>
 </dict>
 </plist>
