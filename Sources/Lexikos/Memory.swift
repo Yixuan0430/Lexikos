@@ -177,45 +177,164 @@ struct CardState: Codable, Hashable {
     }
 }
 
-/// Per-deck learning progress, keyed by card index, one JSON file per deck.
-@Observable final class ProgressStore {
-    private(set) var states: [UUID: [Int: CardState]] = [:]
-    private let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("Lexikos/progress", isDirectory: true)
+/// One study action. The per-deck log of these is the source of truth for progress: card states are
+/// derived by replaying it, so logs from several devices merge by plain union, without conflicts.
+struct ReviewEvent: Codable, Hashable, Identifiable {
+    enum Kind: Codable, Hashable {
+        case introduce
+        case grade(Grade)
+        /// Whole-deck "forget progress"; `card` is empty.
+        case reset
+        /// State carried over from the pre-log snapshot files.
+        case seed(CardState)
+    }
+    var id = UUID()
+    var deck: UUID
+    var card: String
+    var date: Date
+    var kind: Kind
 
-    init() {
+    /// Order of replay; the id breaks ties so every device replays identically.
+    static func < (a: Self, b: Self) -> Bool { (a.date, a.id.uuidString) < (b.date, b.id.uuidString) }
+
+    static func replay(_ events: [ReviewEvent], onto start: [String: CardState] = [:]) -> [String: CardState] {
+        var out = start
+        for e in events.sorted(by: <) {
+            switch e.kind {
+            case .introduce: out[e.card] = CardState.introduce(out[e.card], now: e.date)
+            case .grade(let g): out[e.card] = CardState.next(out[e.card], g, now: e.date)
+            case .reset: out = [:]
+            case .seed(let s): out[e.card] = s
+            }
+        }
+        return out
+    }
+}
+
+extension Card {
+    /// Content-derived identity, so progress survives re-imports that reorder cards and matches across devices.
+    var key: String {
+        var h: UInt64 = 0xcbf29ce484222325 // FNV-1a
+        for b in (front + "\u{1F}" + back).utf8 { h = (h ^ UInt64(b)) &* 0x100000001b3 }
+        return String(h, radix: 36)
+    }
+}
+
+extension Deck {
+    /// Card keys by index; repeated cards get "#2", "#3"… so each keeps its own progress.
+    var keys: [String] {
+        var seen: [String: Int] = [:]
+        return cards.map { c in
+            let k = c.key, n = seen[k, default: 0] + 1
+            seen[k] = n
+            return n == 1 ? k : "\(k)#\(n)"
+        }
+    }
+}
+
+/// Per-deck learning progress. Each deck has an append-only event log (JSON Lines) in Application Support;
+/// states are replayed from it and exposed by card index for the views.
+@Observable final class ProgressStore {
+    private(set) var events: [UUID: [ReviewEvent]] = [:]
+    private var replayed: [UUID: [String: CardState]] = [:]
+    /// Called for every event recorded on this device (the sync engine uploads them).
+    @ObservationIgnored var onRecord: ((ReviewEvent) -> Void)?
+    private let dir: URL
+
+    init(dir: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("Lexikos/progress", isDirectory: true)) {
+        self.dir = dir
         Migration.run()
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        Self.migrateSnapshots(in: dir)
         let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
-        for f in files where f.pathExtension == "json" {
+        for f in files where f.pathExtension == "jsonl" {
             guard let id = UUID(uuidString: f.deletingPathExtension().lastPathComponent),
-                  let s = try? JSONDecoder().decode([Int: CardState].self, from: Data(contentsOf: f)) else { continue }
-            states[id] = s
+                  let text = try? String(contentsOf: f, encoding: .utf8) else { continue }
+            events[id] = text.split(separator: "\n").compactMap { try? JSONDecoder().decode(ReviewEvent.self, from: Data($0.utf8)) }
+            replayed[id] = ReviewEvent.replay(events[id]!)
         }
     }
 
     func states(_ deck: Deck) -> [Int: CardState] {
-        guard let raw = states[deck.id] else { return [:] }
-        return raw.filter { deck.cards.indices.contains($0.key) }
+        guard let raw = replayed[deck.id] else { return [:] }
+        var out: [Int: CardState] = [:]
+        for (i, k) in deck.keys.enumerated() { if let s = raw[k] { out[i] = s } }
+        return out
     }
 
     func introduce(_ deck: Deck, card: Int, now: Date = .now) {
-        states[deck.id, default: [:]][card] = CardState.introduce(states[deck.id]?[card], now: now)
-        save(deck)
+        record(ReviewEvent(deck: deck.id, card: deck.keys[card], date: now, kind: .introduce))
     }
 
     func grade(_ deck: Deck, card: Int, _ g: Grade, now: Date = .now) {
-        states[deck.id, default: [:]][card] = CardState.next(states[deck.id]?[card], g, now: now)
-        save(deck)
+        record(ReviewEvent(deck: deck.id, card: deck.keys[card], date: now, kind: .grade(g)))
     }
 
-    func forget(_ deck: Deck) {
-        states[deck.id] = nil
-        try? FileManager.default.removeItem(at: dir.appendingPathComponent("\(deck.id.uuidString).json"))
+    func forget(_ deck: Deck, now: Date = .now) {
+        record(ReviewEvent(deck: deck.id, card: "", date: now, kind: .reset))
     }
 
-    private func save(_ deck: Deck) {
-        try? JSONEncoder().encode(states[deck.id]).write(to: dir.appendingPathComponent("\(deck.id.uuidString).json"))
+    /// Adds events from another device; ones already known are ignored. Returns how many were new.
+    @discardableResult func merge(_ incoming: [ReviewEvent]) -> Int {
+        var added = 0
+        for (deck, batch) in Dictionary(grouping: incoming, by: \.deck) {
+            let known = Set((events[deck] ?? []).map(\.id))
+            let fresh = batch.filter { !known.contains($0.id) }
+            guard !fresh.isEmpty else { continue }
+            events[deck, default: []] += fresh
+            append(fresh, deck: deck)
+            replayed[deck] = ReviewEvent.replay(events[deck]!)
+            added += fresh.count
+        }
+        return added
+    }
+
+    private func record(_ e: ReviewEvent) {
+        events[e.deck, default: []].append(e)
+        append([e], deck: e.deck)
+        // Replaying one event onto the current state equals a full replay unless it is older than the newest.
+        if let last = events[e.deck]?.dropLast().max(by: <), !(last < e) {
+            replayed[e.deck] = ReviewEvent.replay(events[e.deck]!)
+        } else {
+            replayed[e.deck] = ReviewEvent.replay([e], onto: replayed[e.deck] ?? [:])
+        }
+        onRecord?(e)
+    }
+
+    private func append(_ batch: [ReviewEvent], deck: UUID) {
+        let url = dir.appendingPathComponent("\(deck.uuidString).jsonl")
+        let lines = batch.compactMap { try? JSONEncoder().encode($0) }.map { $0 + Data("\n".utf8) }.reduce(Data(), +)
+        if let h = try? FileHandle(forWritingTo: url) {
+            defer { try? h.close() }
+            _ = try? h.seekToEnd()
+            try? h.write(contentsOf: lines)
+        } else {
+            try? lines.write(to: url)
+        }
+    }
+
+    /// One-time conversion of the old `<deck>.json` snapshots (card index → state) into seed events.
+    /// The snapshot is kept as `<deck>.json.legacy`.
+    static func migrateSnapshots(in dir: URL) {
+        let fm = FileManager.default
+        let decksDir = dir.deletingLastPathComponent().appendingPathComponent("decks")
+        let files = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+        for f in files where f.pathExtension == "json" {
+            guard let id = UUID(uuidString: f.deletingPathExtension().lastPathComponent) else { continue }
+            let log = dir.appendingPathComponent("\(id.uuidString).jsonl")
+            guard !fm.fileExists(atPath: log.path),
+                  let old = try? JSONDecoder().decode([Int: CardState].self, from: Data(contentsOf: f)),
+                  let deck = try? JSONDecoder().decode(Deck.self, from: Data(contentsOf: decksDir.appendingPathComponent(f.lastPathComponent)))
+            else { continue }
+            let keys = deck.keys
+            let seeds = old.sorted { $0.key < $1.key }.filter { keys.indices.contains($0.key) }.map { i, s in
+                ReviewEvent(deck: id, card: keys[i], date: s.lastReview, kind: .seed(s))
+            }
+            let data = seeds.compactMap { try? JSONEncoder().encode($0) }.map { $0 + Data("\n".utf8) }.reduce(Data(), +)
+            guard (try? data.write(to: log)) != nil else { continue }
+            try? fm.moveItem(at: f, to: f.appendingPathExtension("legacy"))
+        }
     }
 
     // MARK: Daily & Group plan
