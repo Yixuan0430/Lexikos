@@ -117,6 +117,7 @@ struct HomeView: View {
     @Environment(ProgressStore.self) private var progress
     @Environment(Updater.self) private var updater
     @AppStorage("newPerDay") private var newPerDay = 20
+    @AppStorage("groupSize") private var groupSize = 10
     @AppStorage("startDeck") private var startDeck = ""
     @Environment(\.windowSize) private var size
     @AppStorage("lang") private var lang = AppLanguage.zh
@@ -153,10 +154,16 @@ struct HomeView: View {
                     }
                     section(l["imported"]) {
                         ForEach(store.decks) { deck in
-                            let p = progress.plan(deck, newPerDay: newPerDay)
+                            let p = progress.plan(deck, newPerDay: newPerDay, groupSize: groupSize)
+                            let detailText: String = {
+                                if p.groupQueue.isEmpty { return "\(deck.cards.count) \(l["cards"]) · \(l["today.clear"])" }
+                                if !p.due.isEmpty {
+                                    return "\(l["review"]) \(p.due.count) · \(l["group.nextInfo"]) \(p.groupQueue.count) \(l["group.words"])"
+                                }
+                                return "\(l["group.nextInfo"])：\(l["new"]) \(p.groupNew.count) · \(l["stat.unseen"]) \(p.unseenCount)"
+                            }()
                             DeckTile(title: deck.name.replacingOccurrences(of: "_", with: " "),
-                                     detail: p.due.isEmpty && p.new.isEmpty ? "\(deck.cards.count) \(l["cards"]) · \(l["today.clear"])"
-                                         : "\(l["review"]) \(p.due.count) · \(l["new"]) \(p.new.count)",
+                                     detail: detailText,
                                      glyph: deck.glyph, accent: accent) {
                                 route = .overview(deck)
                             }
@@ -203,7 +210,7 @@ struct HomeView: View {
     }
 
     private var todaySummary: some View {
-        let plans = store.decks.map { progress.plan($0, newPerDay: newPerDay) }
+        let plans = store.decks.map { progress.plan($0, newPerDay: newPerDay, groupSize: groupSize) }
         let due = plans.map(\.due.count).reduce(0, +), new = plans.map(\.new.count).reduce(0, +)
         let done = plans.map(\.learnedToday).reduce(0, +)
         let heading = VStack(alignment: .leading, spacing: 4) {
@@ -240,7 +247,7 @@ struct HomeView: View {
     /// Deck chooser + start button. The chooser is a menu dressed as a deck row, not a system pop-up.
     @ViewBuilder private var startPanel: some View {
         if let chosen = store.decks.first(where: { $0.id.uuidString == startDeck }) ?? store.decks.first {
-            let p = progress.plan(chosen, newPerDay: newPerDay)
+            let p = progress.plan(chosen, newPerDay: newPerDay, groupSize: groupSize)
             VStack(spacing: 10) {
                 Menu {
                     ForEach(store.decks) { d in
@@ -257,7 +264,7 @@ struct HomeView: View {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(chosen.name.replacingOccurrences(of: "_", with: " "))
                                 .font(.system(size: 13, weight: .medium)).foregroundStyle(Color.ink).lineLimit(1).truncationMode(.middle)
-                            Text("\(l["review"]) \(p.due.count) · \(l["new"]) \(p.new.count)")
+                            Text("\(l["group.nextInfo"])：\(l["review"]) \(p.groupDue.count) · \(l["new"]) \(p.groupNew.count)")
                                 .font(.system(size: 11)).foregroundStyle(Color.muted)
                         }
                         Spacer(minLength: 4)
@@ -272,12 +279,14 @@ struct HomeView: View {
                 .help(l["start.from"])
 
                 Button { route = .study(chosen) } label: {
-                    Label(l["start.go"], systemImage: "play.fill").font(.system(size: 13, weight: .semibold))
+                    let btnText = p.due.isEmpty && p.learnedToday > 0 ? l["start.nextGroup"] : l["start.group"]
+                    Label(btnText, systemImage: "play.fill").font(.system(size: 13, weight: .semibold))
                         .frame(maxWidth: .infinity).padding(.vertical, 9)
                         .background(RoundedRectangle(cornerRadius: 10).fill(accent.color)).foregroundStyle(Color.bg)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain).focusable(false)
+                .disabled(p.groupQueue.isEmpty).opacity(p.groupQueue.isEmpty ? 0.4 : 1)
             }
         }
     }
@@ -347,8 +356,10 @@ struct SettingsView: View {
     @AppStorage("appearance") private var appearance = Appearance.system
     @AppStorage("accent") private var accent = Accent.sage
     @AppStorage("newPerDay") private var newPerDay = 20
+    @AppStorage("groupSize") private var groupSize = 10
     @AppStorage("autoSpeak") private var autoSpeak = true
     private static let presets = [5, 10, 20, 30, 50]
+    private static let groupPresets = [5, 10, 15, 20, 30]
     private var l: L { L(lang: lang) }
 
     var body: some View {
@@ -365,6 +376,21 @@ struct SettingsView: View {
             row(l["autoSpeak"]) {
                 Picker("", selection: $autoSpeak) { Text(l["on"]).tag(true); Text(l["off"]).tag(false) }
                     .pickerStyle(.segmented).labelsHidden()
+            }
+            row(l["group.size"]) {
+                HStack(spacing: 12) {
+                    Picker("", selection: Binding(get: { Self.groupPresets.contains(groupSize) ? groupSize : -1 },
+                                                  set: { if $0 > 0 { groupSize = $0 } })) {
+                        ForEach(Self.groupPresets, id: \.self) { Text("\($0)").tag($0) }
+                        Text(l["custom"]).tag(-1)
+                    }
+                    .pickerStyle(.segmented).labelsHidden()
+                    HStack(spacing: 4) {
+                        TextField("", value: Binding(get: { groupSize }, set: { groupSize = min(200, max(1, $0)) }), format: .number)
+                            .textFieldStyle(.roundedBorder).frame(width: 52).multilineTextAlignment(.trailing)
+                        Stepper("", value: $groupSize, in: 1...200).labelsHidden()
+                    }
+                }
             }
             row(l["newPerDay"]) {
                 HStack(spacing: 12) {

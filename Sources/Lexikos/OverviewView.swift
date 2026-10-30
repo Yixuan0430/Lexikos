@@ -9,12 +9,13 @@ struct OverviewView: View {
     @AppStorage("lang") private var lang = AppLanguage.zh
     @AppStorage("accent") private var accent = Accent.sage
     @AppStorage("newPerDay") private var newPerDay = 20
+    @AppStorage("groupSize") private var groupSize = 10
     @State private var selected: Int?
     @Environment(\.windowSize) private var size
 
     private var l: L { L(lang: lang) }
     private var states: [Int: CardState] { progress.states(deck) }
-    private var plan: ProgressStore.Plan { progress.plan(deck, newPerDay: newPerDay) }
+    private var plan: ProgressStore.Plan { progress.plan(deck, newPerDay: newPerDay, groupSize: groupSize) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -43,7 +44,9 @@ struct OverviewView: View {
         .frame(maxWidth: .infinity)
         .padding(.horizontal, size.gutter).padding(.top, 40)
         .sheet(item: Binding(get: { selected.map { IdentifiedInt(id: $0) } }, set: { selected = $0?.id })) { item in
-            WordCurveSheet(card: deck.cards[item.id], state: states[item.id]!, accent: accent, l: l)
+            if deck.cards.indices.contains(item.id), let st = states[item.id] {
+                WordCurveSheet(card: deck.cards[item.id], state: st, accent: accent, l: l)
+            }
         }
     }
 
@@ -53,40 +56,68 @@ struct OverviewView: View {
         let p = plan
         let layout = size.compact ? AnyLayout(VStackLayout(alignment: .leading, spacing: 14))
             : AnyLayout(HStackLayout(alignment: .center, spacing: 24))
+        let subtitle: String = {
+            if p.groupQueue.isEmpty { return l["today.clear"] }
+            if !p.due.isEmpty {
+                return "\(l["stat.due"]) \(p.due.count) · \(l["group.nextInfo"])：\(l["review"]) \(p.groupDue.count)" +
+                    (p.groupNew.count > 0 ? " + \(l["new"]) \(p.groupNew.count)" : "")
+            }
+            return "\(l["group.reviewsClear"]) · \(l["group.nextInfo"])：\(l["new"]) \(p.groupNew.count)"
+        }()
         return layout {
             VStack(alignment: .leading, spacing: 6) {
                 Text(deck.name.replacingOccurrences(of: "_", with: " "))
                     .font(.system(size: 26, weight: .medium, design: .serif)).foregroundStyle(Color.ink).lineLimit(2)
-                Text(p.due.isEmpty && p.new.isEmpty ? l["today.clear"]
-                     : "\(l["today.plan"]) · \(l["review"]) \(p.due.count) · \(l["new"]) \(p.new.count)")
+                Text(subtitle)
                     .font(.system(size: 13)).foregroundStyle(Color.muted)
             }
             if !size.compact { Spacer() }
             HStack(spacing: 10) {
-            Button { route = .free(deck) } label: {
-                Label(l["free"], systemImage: "shuffle").font(.system(size: 13, weight: .medium))
-                    .padding(.horizontal, 14).padding(.vertical, 9)
+                Menu {
+                    ForEach([5, 10, 15, 20, 30], id: \.self) { n in
+                        Button { groupSize = n } label: {
+                            if groupSize == n { Label("\(l["group.per"]) \(n) \(l["group.words"])", systemImage: "checkmark") }
+                            else { Text("\(l["group.per"]) \(n) \(l["group.words"])") }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "square.grid.2x2").font(.system(size: 12))
+                        Text("\(l["group.per"]) \(groupSize) \(l["group.words"])").font(.system(size: 13, weight: .medium)).monospacedDigit()
+                        Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(Color.muted)
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 9)
                     .background(Capsule().strokeBorder(Color.line)).foregroundStyle(Color.ink)
-            }
-            .buttonStyle(.plain).focusable(false)
-            Button { route = .study(deck) } label: {
-                Label(l["start"], systemImage: "play.fill").font(.system(size: 13, weight: .semibold))
-                    .padding(.horizontal, 18).padding(.vertical, 9)
-                    .background(Capsule().fill(accent.color)).foregroundStyle(Color.bg)
-            }
-            .buttonStyle(.plain).focusable(false)
-            .disabled(p.due.isEmpty && p.new.isEmpty).opacity(p.due.isEmpty && p.new.isEmpty ? 0.4 : 1)
+                }
+                .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).focusable(false)
+
+                Button { route = .free(deck) } label: {
+                    Label(l["free"], systemImage: "shuffle").font(.system(size: 13, weight: .medium))
+                        .padding(.horizontal, 14).padding(.vertical, 9)
+                        .background(Capsule().strokeBorder(Color.line)).foregroundStyle(Color.ink)
+                }
+                .buttonStyle(.plain).focusable(false)
+
+                Button { route = .study(deck) } label: {
+                    let startTitle = p.due.isEmpty && p.learnedToday > 0 ? l["start.nextGroup"] : l["start.group"]
+                    Label(startTitle, systemImage: "play.fill").font(.system(size: 13, weight: .semibold))
+                        .padding(.horizontal, 18).padding(.vertical, 9)
+                        .background(Capsule().fill(accent.color)).foregroundStyle(Color.bg)
+                }
+                .buttonStyle(.plain).focusable(false)
+                .disabled(p.groupQueue.isEmpty).opacity(p.groupQueue.isEmpty ? 0.4 : 1)
             }
         }
     }
 
     private var stats: some View {
         let s = states.values
+        let unseen = max(0, deck.cards.count - s.count)
         let items: [(String, Int, Color)] = [
             (l["stat.due"], plan.due.count, gradeColor(.forgot)),
             (l["stat.learning"], s.filter { !$0.mastered }.count, gradeColor(.vague)),
             (l["stat.mastered"], s.filter(\.mastered).count, gradeColor(.remembered)),
-            (l["stat.unseen"], deck.cards.count - s.count, Color.muted),
+            (l["stat.unseen"], unseen, Color.muted),
             (l["stat.today"], plan.learnedToday, accent.color),
         ]
         return LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 12)], spacing: 12) {
@@ -192,13 +223,17 @@ struct OverviewView: View {
     // MARK: Words
 
     private var words: some View {
-        let now = Date.now
+        let now = Date.now, cal = Calendar.current
+        let todayStart = cal.startOfDay(for: now)
+        let endOfDay = cal.date(byAdding: .day, value: 1, to: todayStart)!
         let rows = states.map { ($0.key, $0.value, $0.value.retention(at: now)) }.sorted { $0.2 < $1.2 }
         return VStack(spacing: 0) {
             if rows.isEmpty {
                 Text(l["words.empty"]).font(.system(size: 13)).foregroundStyle(Color.muted).padding(.vertical, 8)
             }
             ForEach(rows, id: \.0) { i, st, r in
+                let isDueToday = st.step > 0 || st.due < endOfDay
+                let calDays = Double(max(1, cal.dateComponents([.day], from: todayStart, to: cal.startOfDay(for: st.due)).day ?? 1))
                 Button { selected = i } label: {
                     HStack(spacing: 14) {
                         Text(CardParts.splitGloss(deck.cards[i].front).0.replacingOccurrences(of: "\n", with: " / "))
@@ -212,8 +247,8 @@ struct OverviewView: View {
                         .frame(width: 120, height: 6)
                         Text("\(Int(r * 100))%").font(.system(size: 12)).monospacedDigit().foregroundStyle(Color.muted)
                             .frame(width: 38, alignment: .trailing)
-                        Text(st.due <= now ? l["due.now"] : PracticeView.interval(st.due.timeIntervalSince(now) / 86400, l))
-                            .font(.system(size: 12)).foregroundStyle(Color.muted).frame(width: 70, alignment: .trailing)
+                        Text(isDueToday ? l["due.now"] : PracticeView.interval(calDays, l))
+                            .font(.system(size: 12)).foregroundStyle(isDueToday ? accent.color : Color.muted).frame(width: 70, alignment: .trailing)
                         Image(systemName: "chevron.right").font(.system(size: 10)).foregroundStyle(Color.muted.opacity(0.6))
                     }
                     .padding(.vertical, 9)
@@ -236,15 +271,17 @@ struct WordCurveSheet: View {
     private struct Pt: Identifiable { let id = UUID(); let date: Date; let value: Double; let segment: Int }
 
     private var points: [Pt] {
-        let reviews = state.reviews
+        let reviews = state.reviews.isEmpty
+            ? [Review(date: state.lastReview, grade: .remembered, stability: max(0.3, state.stability))]
+            : state.reviews
         let end = max(Date.now, state.due).addingTimeInterval(7 * 86400)
         var out: [Pt] = []
         for (k, r) in reviews.enumerated() {
             let stop = k + 1 < reviews.count ? reviews[k + 1].date : end
-            let span = stop.timeIntervalSince(r.date)
+            let span = max(0, stop.timeIntervalSince(r.date))
             for step in 0...40 {
                 let t = r.date.addingTimeInterval(span * Double(step) / 40)
-                out.append(Pt(date: t, value: CardState.retention(days: t.timeIntervalSince(r.date) / 86400, stability: r.stability) * 100, segment: k))
+                out.append(Pt(date: t, value: CardState.retention(days: max(0, t.timeIntervalSince(r.date)) / 86400, stability: r.stability) * 100, segment: k))
             }
         }
         return out

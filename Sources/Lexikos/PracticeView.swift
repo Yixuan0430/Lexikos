@@ -20,22 +20,32 @@ struct PracticeView: View {
     @FocusState private var focused: Bool
     @State private var speaker = Speaker()
     @AppStorage("autoSpeak") private var autoSpeak = true
-    @State private var learning = false // first sight of a new word: shown with its answer, counted as not yet known
+    @State private var learning = false // first sight of a new word: shown with its answer
     @State private var newLearned = 0
+    @State private var reviewedCount = 0
     @Environment(\.windowSize) private var size
     private var k: CGFloat { size.cardScale }
     @Environment(ProgressStore.self) private var progress
     @AppStorage("newPerDay") private var newPerDay = 20
-    // Study session: remaining queue, current card index, cards already scheduled this session.
+    @AppStorage("groupSize") private var groupSize = 10
+    @AppStorage("freeCount") private var freeCount = 20
+
+    // Study session: remaining queue in current group, current card index, cards already graded once in this group.
     @State private var queue: [Int] = []
     @State private var current: Int?
-    @State private var scheduled: Set<Int> = []
+    @State private var gradedOnce: Set<Int> = []
     @State private var tally: [Grade: Int] = [:]
     @State private var finished = false
+    @State private var groupIndex = 1
+
+    // Free practice setup state: asks user for word count before each free practice round.
+    @State private var settingUpFree = false
+    @State private var freeTotal = 0
 
     private var l: L { L(lang: lang) }
     private var isNumbers: Bool { if case .numbers = source { true } else { false } }
     private var isStudy: Bool { if case .study = source { true } else { false } }
+    private var isFree: Bool { if case .free = source { true } else { false } }
     private var deck: Deck? {
         switch source { case .numbers: nil; case .free(let d), .study(let d): d }
     }
@@ -45,20 +55,32 @@ struct PracticeView: View {
         VStack(spacing: 0) {
             header
             Spacer(minLength: 16)
-            if finished { doneView } else { cardView }
+            if settingUpFree, let d = deck {
+                freeSetupView(d)
+            } else if finished {
+                doneView
+            } else {
+                cardView
+            }
             Spacer(minLength: 16)
-            if isStudy && revealed && !finished { Group { if learning { learnBar } else { gradeBar } }.padding(.bottom, 14) }
+            if isStudy && revealed && !finished && !settingUpFree {
+                Group { if learning { learnBar } else { gradeBar } }.padding(.bottom, 14)
+            }
             footer
         }
         .padding(.horizontal, size.gutter).padding(.top, 40).padding(.bottom, 24)
         .focusable().focused($focused).focusEffectDisabled()
         .onAppear {
             focused = true
-            if case .study(let d) = source {
-                let plan = progress.plan(d, newPerDay: newPerDay)
-                queue = plan.due + plan.new
+            switch source {
+            case .study:
+                startGroup(resetGroupIndex: true)
+            case .free(let d):
+                freeCount = min(max(1, freeCount), max(1, d.cards.count))
+                settingUpFree = true
+            case .numbers:
+                next()
             }
-            next()
         }
         .onKeyPress("1") { grade(.forgot); return .handled }
         .onKeyPress("2") { grade(.vague); return .handled }
@@ -66,14 +88,14 @@ struct PracticeView: View {
         .onKeyPress("a") { speak(slow: true); return .handled }
         .onKeyPress(.space) { advance(); return .handled }
         .onKeyPress(.return) { advance(); return .handled }
-        .onKeyPress(.rightArrow) { next(); return .handled }
+        .onKeyPress(.rightArrow) { if !settingUpFree && !finished { next() }; return .handled }
         .onKeyPress(.escape) { goBack(); return .handled }
         .onKeyPress("s") { speak(); return .handled }
         .onKeyPress("d") { toggleDetails(); return .handled }
     }
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 8) {
             Button(action: goBack) {
                 Label(l["back"], systemImage: "chevron.left").font(.system(size: 13))
             }
@@ -87,11 +109,148 @@ struct PracticeView: View {
                 Text(d.name.replacingOccurrences(of: "_", with: " "))
                     .font(.system(size: 13, weight: .medium)).foregroundStyle(Color.muted).lineLimit(1)
                 if isStudy && !finished {
-                    Text("· \(l["remaining"]) \(queue.count + (current == nil ? 0 : 1))")
+                    let counts = groupCounts(d)
+                    HStack(spacing: 10) {
+                        Text("· \(l["group.label"]) #\(groupIndex)")
+                            .font(.system(size: 12, weight: .medium)).foregroundStyle(Color.muted)
+                        HStack(spacing: 8) {
+                            badgeCount(counts.review, color: gradeColor(.remembered), help: l["review"])
+                            badgeCount(counts.learning, color: gradeColor(.forgot), help: l["stat.learning"])
+                            badgeCount(counts.new, color: accent.color, help: l["new"])
+                        }
+                        Text("(\(l["remaining"]) \(queue.count + (current == nil ? 0 : 1)))")
+                            .font(.system(size: 12)).foregroundStyle(Color.muted).monospacedDigit()
+                    }
+                } else if isFree && !settingUpFree && !finished {
+                    Text("· \(l["remaining"]) \(order.count + 1) / \(freeTotal)")
                         .font(.system(size: 13)).foregroundStyle(Color.muted).monospacedDigit()
                 }
             }
         }
+    }
+
+    private func badgeCount(_ n: Int, color: Color, help: String) -> some View {
+        HStack(spacing: 4) {
+            Circle().fill(color).frame(width: 6, height: 6)
+            Text("\(n)").font(.system(size: 12, weight: .medium)).monospacedDigit().foregroundStyle(Color.ink)
+        }
+        .help(help)
+    }
+
+    private func groupCounts(_ d: Deck) -> (review: Int, learning: Int, new: Int) {
+        let s = progress.states(d)
+        let active = (current.map { [$0] } ?? []) + queue
+        var rev = 0, lrn = 0, nw = 0
+        for idx in Set(active) {
+            guard let st = s[idx] else { nw += 1; continue }
+            if st.step > 0 { lrn += 1 } else { rev += 1 }
+        }
+        return (rev, lrn, nw)
+    }
+
+    // MARK: Free Practice Setup
+
+    private func freeSetupView(_ d: Deck) -> some View {
+        let total = max(1, d.cards.count)
+        let basePresets = [10, 20, 30, 50, 100].filter { $0 < total }
+        return VStack(spacing: 22) {
+            Image(systemName: "shuffle.circle")
+                .font(.system(size: 42, weight: .light))
+                .foregroundStyle(accent.color)
+            VStack(spacing: 6) {
+                Text(l["free.setup.title"])
+                    .font(.system(size: 28, weight: .medium, design: .serif))
+                    .foregroundStyle(Color.ink)
+                Text("\(l["free.setup.sub"])（\(total) \(l["cards"])）")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color.muted)
+            }
+
+            VStack(alignment: .leading, spacing: 14) {
+                Text(l["free.count"])
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color.muted)
+
+                HStack(spacing: 8) {
+                    ForEach(basePresets, id: \.self) { p in
+                        presetPill("\(p)", selected: freeCount == p) { freeCount = p }
+                    }
+                    presetPill("\(l["free.all"]) (\(total))", selected: freeCount == total) { freeCount = total }
+                }
+
+                HStack(spacing: 8) {
+                    Text(l["custom"])
+                        .font(.system(size: 13))
+                        .foregroundStyle(Color.muted)
+                    Spacer()
+                    stepButton("-10") { freeCount = min(max(1, freeCount - 10), total) }
+                    stepButton("−") { freeCount = min(max(1, freeCount - 1), total) }
+                    Text("\(min(max(1, freeCount), total))")
+                        .font(.system(size: 15, weight: .semibold, design: .serif))
+                        .monospacedDigit()
+                        .foregroundStyle(Color.ink)
+                        .frame(minWidth: 52)
+                        .padding(.vertical, 5).padding(.horizontal, 10)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Color.bg))
+                        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.line))
+                    stepButton("+") { freeCount = min(max(1, freeCount + 1), total) }
+                    stepButton("+10") { freeCount = min(max(1, freeCount + 10), total) }
+                }
+            }
+            .padding(20)
+            .frame(maxWidth: 440)
+            .background(RoundedRectangle(cornerRadius: 14).fill(Color.panel))
+            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.line))
+
+            Button { startFreePractice(d) } label: {
+                Label("\(l["free.start"])（\(min(max(1, freeCount), total)) \(l["group.words"])）", systemImage: "play.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .padding(.horizontal, 26).padding(.vertical, 11)
+                    .background(Capsule().fill(accent.color))
+                    .foregroundStyle(Color.bg)
+            }
+            .buttonStyle(.plain).focusable(false)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func presetPill(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 13, weight: selected ? .semibold : .regular))
+                .monospacedDigit()
+                .padding(.horizontal, 12).padding(.vertical, 7)
+                .background(Capsule().fill(selected ? accent.color : Color.bg))
+                .foregroundStyle(selected ? Color.bg : Color.ink)
+                .overlay(Capsule().strokeBorder(selected ? accent.color : Color.line))
+        }
+        .buttonStyle(.plain).focusable(false)
+    }
+
+    private func stepButton(_ label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 12, weight: .medium))
+                .monospacedDigit()
+                .frame(minWidth: 32)
+                .padding(.vertical, 6).padding(.horizontal, 6)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.bg))
+                .foregroundStyle(Color.ink)
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.line))
+        }
+        .buttonStyle(.plain).focusable(false)
+    }
+
+    private func startFreePractice(_ d: Deck) {
+        let count = min(max(1, freeCount), max(1, d.cards.count))
+        freeCount = count
+        order = Array(d.cards.indices.shuffled().prefix(count))
+        freeTotal = order.count
+        seen = 0
+        finished = false
+        settingUpFree = false
+        focused = true
+        next()
     }
 
     // MARK: Card
@@ -99,13 +258,19 @@ struct PracticeView: View {
     private var cardView: some View {
         VStack(spacing: detailsOpen ? 14 : 22) {
             VStack(spacing: 10) {
+                if isStudy, let d = deck, let i = current, let st = progress.states(d)[i], st.step > 0, !learning {
+                    Text(l["relearn.badge"])
+                        .font(.system(size: 11, weight: .semibold))
+                        .padding(.horizontal, 9).padding(.vertical, 3)
+                        .background(Capsule().fill(gradeColor(.forgot).opacity(0.15)))
+                        .foregroundStyle(gradeColor(.forgot))
+                }
                 Text(parts.front)
                     .font(frontFont)
                     .monospacedDigit()
                     .foregroundStyle(Color.ink)
                     .multilineTextAlignment(.center)
                     .minimumScaleFactor(0.5)
-                    .contentTransition(.numericText())
                 if let tag = parts.tag {
                     Text(tag).font(.system(size: 12, weight: .medium))
                         .padding(.horizontal, 10).padding(.vertical, 3)
@@ -230,9 +395,13 @@ struct PracticeView: View {
 
     private var footer: some View {
         HStack {
-            Text(learning ? l["tap.learn"] : revealed ? (isStudy ? l["tap.grade"] : l["tap.next"]) : l["tap.reveal"])
+            if settingUpFree {
+                Text(l["free.setup.sub"])
+            } else {
+                Text(learning ? l["tap.learn"] : revealed ? (isStudy ? l["tap.grade"] : l["tap.next"]) : l["tap.reveal"])
+            }
             Spacer()
-            if !size.compact {
+            if !size.compact && !settingUpFree {
                 Text(isNumbers ? l["keys"] : isStudy ? l["keys.study"] : l["keys.deck"]).lineLimit(1)
                 Spacer()
             }
@@ -249,7 +418,17 @@ struct PracticeView: View {
     }
 
     private func advance() {
-        if finished { return }
+        if settingUpFree, let d = deck {
+            startFreePractice(d)
+            return
+        }
+        if finished {
+            if isStudy, let d = deck {
+                let nextPlan = progress.plan(d, newPerDay: newPerDay, groupSize: groupSize)
+                if !nextPlan.groupQueue.isEmpty { startGroup(resetGroupIndex: false) }
+            }
+            return
+        }
         if learning { return continueLearning() }
         if !revealed { reveal() } else if !isStudy { next() }
     }
@@ -258,22 +437,43 @@ struct PracticeView: View {
         if let d = deck { route = .overview(d) } else { route = nil }
     }
 
-    private func grade(_ g: Grade) {
-        guard isStudy, revealed, !learning, let d = deck, let i = current else { return }
-        // Only the first answer of a session moves the schedule; repeats are in-session drilling.
-        if !scheduled.contains(i) {
-            progress.grade(d, card: i, g)
-            scheduled.insert(i)
-            tally[g, default: 0] += 1
+    private func startGroup(resetGroupIndex: Bool) {
+        guard case .study(let d) = source else { return }
+        let plan = progress.plan(d, newPerDay: newPerDay, groupSize: groupSize)
+        if resetGroupIndex {
+            groupIndex = 1
+        } else {
+            groupIndex += 1
         }
-        if g == .forgot { queue.insert(i, at: min(4, queue.count)) }
+        queue = plan.groupQueue
+        gradedOnce = []
+        tally = [:]
+        newLearned = 0
+        reviewedCount = plan.groupDue.count
+        finished = false
+        focused = true
         next()
     }
 
-    /// New word seen once: record it as not yet known and bring it back later this session as a real test.
+    private func grade(_ g: Grade) {
+        guard isStudy, revealed, !learning, !settingUpFree, !finished, let d = deck, let i = current else { return }
+        // Record first-attempt rating in the group summary tally.
+        if !gradedOnce.contains(i) {
+            gradedOnce.insert(i)
+            tally[g, default: 0] += 1
+        }
+        // Always update CardState so Anki learning/relearning steps graduate properly when recalled.
+        progress.grade(d, card: i, g)
+        if g == .forgot {
+            queue.insert(i, at: min(4, queue.count))
+        }
+        next()
+    }
+
+    /// New word seen once: enter Anki Learning Step 1 (1 min) and bring it back in a few cards for its first test.
     private func continueLearning() {
         guard let d = deck, let i = current else { return }
-        progress.grade(d, card: i, .forgot)
+        progress.introduce(d, card: i)
         newLearned += 1
         queue.insert(i, at: min(5, queue.count))
         next()
@@ -321,10 +521,10 @@ struct PracticeView: View {
         .frame(maxWidth: 560)
     }
 
-    /// When the card would come back after this grade, e.g. "4 天后".
+    /// When the card would come back after this grade, e.g. "本组重现", "1 天后", "3 天后".
     private func preview(_ g: Grade) -> String {
         guard let d = deck, let i = current else { return "" }
-        if scheduled.contains(i) { return g == .forgot ? l["again.soon"] : "" }
+        if g == .forgot { return l["again.soon"] }
         let s = CardState.next(progress.states(d)[i], g)
         return Self.interval(s.stability, l)
     }
@@ -332,31 +532,93 @@ struct PracticeView: View {
     /// "3 天后" (later = true) or "3 天" (a duration).
     static func interval(_ days: Double, _ l: L, later: Bool = true) -> String {
         let p = later ? "unit" : "dur"
-        return days < 1 ? "\(max(1, Int((days * 24).rounded()))) \(l["\(p).hours"])"
-            : days < 60 ? "\(Int(days.rounded())) \(l["\(p).days"])"
+        if days < 1.0 / 24.0 {
+            return later ? "\(max(1, Int((days * 1440).rounded()))) \(l["unit.mins"])"
+                         : "\(max(1, Int((days * 1440).rounded()))) min"
+        }
+        return days < 0.85 ? "\(max(1, Int((days * 24).rounded()))) \(l["\(p).hours"])"
+            : days < 60 ? "\(max(1, Int(days.rounded()))) \(l["\(p).days"])"
             : "\(Int((days / 30).rounded())) \(l["\(p).months"])"
     }
 
-    private var doneView: some View {
-        VStack(spacing: 18) {
-            Image(systemName: "checkmark.circle").font(.system(size: 44, weight: .light)).foregroundStyle(accent.color)
-            Text(l["done.title"]).font(.system(size: 28, weight: .medium, design: .serif)).foregroundStyle(Color.ink)
-            HStack(spacing: 22) {
-                if newLearned > 0 {
-                    Text("\(l["new"]) \(newLearned)").font(.system(size: 13)).foregroundStyle(Color.muted)
+    @ViewBuilder private var doneView: some View {
+        if isFree {
+            VStack(spacing: 18) {
+                Image(systemName: "checkmark.circle").font(.system(size: 44, weight: .light)).foregroundStyle(accent.color)
+                Text(l["free.done.title"]).font(.system(size: 28, weight: .medium, design: .serif)).foregroundStyle(Color.ink)
+                Text("\(freeTotal) \(l["cards"])")
+                    .font(.system(size: 14)).foregroundStyle(Color.muted).monospacedDigit()
+                HStack(spacing: 12) {
+                    Button {
+                        settingUpFree = true
+                        finished = false
+                        focused = true
+                    } label: {
+                        Label(l["free.again"], systemImage: "shuffle")
+                            .font(.system(size: 13, weight: .semibold))
+                            .padding(.horizontal, 20).padding(.vertical, 10)
+                            .background(Capsule().fill(accent.color)).foregroundStyle(Color.bg)
+                    }
+                    .buttonStyle(.plain).focusable(false)
+
+                    pill(l["back.overview"], "chart.xyaxis.line") { goBack() }
                 }
-                ForEach(Grade.allCases, id: \.self) { g in
-                    HStack(spacing: 6) {
-                        Circle().fill(gradeColor(g)).frame(width: 8, height: 8)
-                        Text("\(l["grade.\(g)"]) \(tally[g] ?? 0)").font(.system(size: 13)).foregroundStyle(Color.muted)
+                .padding(.top, 6)
+            }
+        } else {
+            let nextPlan = deck.map { progress.plan($0, newPerDay: newPerDay, groupSize: groupSize) }
+            let hasMore = !(nextPlan?.groupQueue.isEmpty ?? true)
+            VStack(spacing: 18) {
+                Image(systemName: "checkmark.circle").font(.system(size: 44, weight: .light)).foregroundStyle(accent.color)
+                Text(hasMore ? "\(l["group.done"]) (#\(groupIndex))" : l["done.title"])
+                    .font(.system(size: 28, weight: .medium, design: .serif)).foregroundStyle(Color.ink)
+
+                HStack(spacing: 20) {
+                    if reviewedCount > 0 {
+                        Text("\(l["review"]) \(reviewedCount)").font(.system(size: 13)).foregroundStyle(Color.muted)
+                    }
+                    if newLearned > 0 {
+                        Text("\(l["new"]) \(newLearned)").font(.system(size: 13)).foregroundStyle(Color.muted)
+                    }
+                    ForEach(Grade.allCases, id: \.self) { g in
+                        HStack(spacing: 6) {
+                            Circle().fill(gradeColor(g)).frame(width: 8, height: 8)
+                            Text("\(l["grade.\(g)"]) \(tally[g] ?? 0)").font(.system(size: 13)).foregroundStyle(Color.muted)
+                        }
                     }
                 }
+
+                if let np = nextPlan, hasMore {
+                    VStack(spacing: 12) {
+                        if !np.due.isEmpty {
+                            Text("\(l["stat.due"]) \(np.due.count) · \(l["group.nextInfo"])：\(l["review"]) \(np.groupDue.count)" +
+                                 (np.groupNew.count > 0 ? " + \(l["new"]) \(np.groupNew.count)" : ""))
+                                .font(.system(size: 13)).foregroundStyle(Color.muted)
+                        } else {
+                            Text("\(l["group.reviewsClear"])（\(l["stat.unseen"]) \(np.unseenCount)）")
+                                .font(.system(size: 13)).foregroundStyle(Color.muted)
+                        }
+
+                        Button { startGroup(resetGroupIndex: false) } label: {
+                            let labelText = !np.groupDue.isEmpty
+                                ? "\(l["group.next"])（\(l["review"]) \(np.groupDue.count)\(np.groupNew.count > 0 ? " · \(l["new"]) \(np.groupNew.count)" : "")）"
+                                : "\(l["group.next.new"])（\(np.groupNew.count) \(l["group.words"])）"
+                            Label(labelText, systemImage: "play.fill")
+                                .font(.system(size: 14, weight: .semibold))
+                                .padding(.horizontal, 24).padding(.vertical, 10)
+                                .background(Capsule().fill(accent.color)).foregroundStyle(Color.bg)
+                        }
+                        .buttonStyle(.plain).focusable(false)
+                    }
+                    .padding(.top, 4)
+                }
+
+                HStack(spacing: 10) {
+                    pill(l["back.overview"], "chart.xyaxis.line") { goBack() }
+                    if let d = deck { pill(l["free"], "shuffle") { route = .free(d) } }
+                }
+                .padding(.top, 4)
             }
-            HStack(spacing: 10) {
-                pill(l["back.overview"], "chart.xyaxis.line") { goBack() }
-                if let d = deck { pill(l["free"], "shuffle") { route = .free(d) } }
-            }
-            .padding(.top, 6)
         }
     }
 
@@ -375,9 +637,13 @@ struct PracticeView: View {
             let e = FrenchNumbers.entry(n)
             c = Card(front: "\(n)", back: e.word, hint: "/\(e.ipa)/")
         case .free(let d):
-            // Shuffled pass through the deck, reshuffled when exhausted.
-            if order.isEmpty { order = Array(d.cards.indices).shuffled() }
-            c = d.cards[order.removeLast()]
+            guard !order.isEmpty else {
+                withAnimation { finished = true; current = nil }
+                return
+            }
+            let i = order.removeLast()
+            current = i
+            c = d.cards[i]
         case .study(let d):
             guard !queue.isEmpty else {
                 learning = false
@@ -391,12 +657,12 @@ struct PracticeView: View {
         var isNew = false
         if case .study(let d) = source, let i = current { isNew = progress.states(d)[i] == nil }
         speaker.stop()
+        card = c
+        parts = CardParts(c)
+        section = parts.sections.first?.id ?? ""
         withAnimation(.snappy(duration: 0.25)) {
             learning = isNew
             revealed = isNew
-            card = c
-            parts = CardParts(c)
-            section = parts.sections.first?.id ?? ""
         }
         if isNew { seen += 1; if autoSpeak { speak() } }
     }
