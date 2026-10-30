@@ -69,11 +69,13 @@ struct PracticeView: View {
             }
             Spacer(minLength: 16)
             if isStudy && revealed && !finished && !settingUpFree {
-                Group { if learning { learnBar } else { gradeBar } }.padding(.bottom, 14)
+                Group { if learning { learnBar } else { gradeBar } }.padding(.bottom, bottomGap)
             }
+            #if os(macOS)
             footer
+            #endif
         }
-        .padding(.horizontal, size.gutter).padding(.top, size.top).padding(.bottom, 24)
+        .padding(.horizontal, size.gutter).padding(.top, size.top).padding(.bottom, pageBottom)
         .focusable().focused($focused).focusEffectDisabled()
         .onAppear {
             focused = true
@@ -531,19 +533,32 @@ struct PracticeView: View {
 
     // MARK: Grading
 
+    /// Space under the action bar and the page; on iPhone the home indicator's safe area already separates them from the edge.
+    #if os(iOS)
+    private let bottomGap: CGFloat = 4, pageBottom: CGFloat = 4
+    #else
+    private let bottomGap: CGFloat = 14, pageBottom: CGFloat = 24
+    #endif
+
     private var gradeBar: some View {
-        HStack(spacing: 12) {
+        #if os(iOS)
+        // Thumb-sized: taller buttons, larger type, no keyboard-shortcut digits.
+        let (title, sub, dot, pad, keys): (CGFloat, CGFloat, CGFloat, CGFloat, Bool) = (18, 14, 10, 30, false)
+        #else
+        let (title, sub, dot, pad, keys): (CGFloat, CGFloat, CGFloat, CGFloat, Bool) = (14, 11, 8, 10, true)
+        #endif
+        return HStack(spacing: 12) {
             ForEach(Grade.allCases, id: \.self) { g in
                 Button { grade(g) } label: {
-                    VStack(spacing: 4) {
+                    VStack(spacing: 6) {
                         HStack(spacing: 6) {
-                            Circle().fill(gradeColor(g)).frame(width: 8, height: 8)
-                            Text(l["grade.\(g)"]).font(.system(size: 14, weight: .medium)).foregroundStyle(Color.ink)
-                            Text("\(g.rawValue)").font(.system(size: 11)).foregroundStyle(Color.muted)
+                            Circle().fill(gradeColor(g)).frame(width: dot, height: dot)
+                            Text(l["grade.\(g)"]).font(.system(size: title, weight: .medium)).foregroundStyle(Color.ink)
+                            if keys { Text("\(g.rawValue)").font(.system(size: 11)).foregroundStyle(Color.muted) }
                         }
-                        Text(preview(g)).font(.system(size: 11)).foregroundStyle(Color.muted)
+                        Text(preview(g)).font(.system(size: sub)).foregroundStyle(Color.muted)
                     }
-                    .frame(maxWidth: .infinity).padding(.vertical, 10)
+                    .frame(maxWidth: .infinity).padding(.vertical, pad)
                     .background(RoundedRectangle(cornerRadius: 12).fill(Color.panel))
                     .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.line))
                     .contentShape(Rectangle())
