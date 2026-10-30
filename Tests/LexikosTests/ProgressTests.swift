@@ -76,4 +76,19 @@ final class ProgressTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: progressDir.appendingPathComponent("\(deck.id.uuidString).json.legacy").path))
         XCTAssertEqual(ProgressStore(dir: progressDir).states(deck), old, "second launch reads the log, not the snapshot")
     }
+
+    func testSameSnapshotMigratedOnTwoDevicesMergesToOneSeed() throws {
+        let old: [Int: CardState] = [2: CardState.next(nil, .vague, now: t0)]
+        func device(_ name: String) throws -> ProgressStore {
+            let dir = root.appendingPathComponent(name)
+            try FileManager.default.createDirectory(at: dir.appendingPathComponent("decks"), withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: dir.appendingPathComponent("progress"), withIntermediateDirectories: true)
+            try JSONEncoder().encode(deck).write(to: dir.appendingPathComponent("decks/\(deck.id.uuidString).json"))
+            try JSONEncoder().encode(old).write(to: dir.appendingPathComponent("progress/\(deck.id.uuidString).json"))
+            return ProgressStore(dir: dir.appendingPathComponent("progress"))
+        }
+        let mac = try device("mac"), other = try device("other")
+        XCTAssertEqual(mac.merge(other.events[deck.id]!), 0)
+        XCTAssertEqual(mac.events[deck.id]?.count, 1)
+    }
 }

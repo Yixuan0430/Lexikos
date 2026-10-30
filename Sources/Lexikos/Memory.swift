@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 enum Grade: Int, Codable, CaseIterable { case forgot = 1, vague, remembered }
 
@@ -333,12 +334,23 @@ extension Deck {
             else { continue }
             let keys = deck.keys
             let seeds = old.sorted { $0.key < $1.key }.filter { keys.indices.contains($0.key) }.map { i, s in
-                ReviewEvent(deck: id, card: keys[i], date: s.lastReview, kind: .seed(s))
+                ReviewEvent(id: seedID(deck: id, card: keys[i], s), deck: id, card: keys[i], date: s.lastReview, kind: .seed(s))
             }
             let data = seeds.compactMap { try? JSONEncoder().encode($0) }.map { $0 + Data("\n".utf8) }.reduce(Data(), +)
             guard (try? data.write(to: log)) != nil else { continue }
             try? fm.moveItem(at: f, to: f.appendingPathExtension("legacy"))
         }
+    }
+
+    /// Content-derived, so two devices migrating the same snapshot produce the same event and sync dedupes it.
+    static func seedID(deck: UUID, card: String, _ s: CardState) -> UUID {
+        let enc = JSONEncoder()
+        enc.outputFormatting = .sortedKeys
+        var bytes = Array(SHA256.hash(data: Data("\(deck.uuidString)|\(card)|".utf8) + ((try? enc.encode(s)) ?? Data())).prefix(16))
+        bytes[6] = bytes[6] & 0x0F | 0x50 // version 5-style, RFC 4122 variant
+        bytes[8] = bytes[8] & 0x3F | 0x80
+        return UUID(uuid: (bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+                           bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]))
     }
 
     // MARK: Daily & Group plan

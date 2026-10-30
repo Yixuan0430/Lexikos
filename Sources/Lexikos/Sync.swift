@@ -14,10 +14,16 @@ import os
     private var engine: CKSyncEngine!
     private let stateFile = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("Lexikos/sync-state.json")
+    /// Record names the server is known to hold. Anything local that is missing gets queued on launch,
+    /// so a failed or dropped upload is retried instead of lost.
+    private var onServer: Set<String>
+    private let onServerFile = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("Lexikos/sync-uploaded.json")
 
     init(decks: DeckStore, progress: ProgressStore) {
         self.decks = decks
         self.progress = progress
+        onServer = (try? JSONDecoder().decode(Set<String>.self, from: Data(contentsOf: onServerFile))) ?? []
         let saved = try? JSONDecoder().decode(CKSyncEngine.State.Serialization.self, from: Data(contentsOf: stateFile))
         let delegate = Delegate(owner: self)
         engine = CKSyncEngine(.init(database: CKContainer(identifier: Self.container).privateCloudDatabase,
@@ -26,6 +32,7 @@ import os
         decks.onSave = { [weak self] in self?.enqueue(.saveRecord(Self.id(deck: $0.id))) }
         decks.onDelete = { [weak self] in self?.enqueue(.deleteRecord(Self.id(deck: $0))) }
         progress.onRecord = { [weak self] in self?.enqueue(.saveRecord(Self.id(event: $0.id))) }
+        enqueueAll()
     }
     private var delegate: Delegate?
 
@@ -34,18 +41,26 @@ import os
         do {
             try await engine.fetchChanges()
             try await engine.sendChanges()
-        } catch { Self.log.error("sync: \(error)") }
+        } catch { Self.log.error("sync: \(error, privacy: .public)") }
     }
 
     private func enqueue(_ change: CKSyncEngine.PendingRecordZoneChange) {
         engine.state.add(pendingRecordZoneChanges: [change])
     }
 
-    /// Everything stored on this device, for the first sync of an account.
+    /// Everything stored on this device that the server is not known to hold.
     private func enqueueAll() {
-        engine.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: Self.zone))])
-        engine.state.add(pendingRecordZoneChanges: decks.decks.map { .saveRecord(Self.id(deck: $0.id)) }
-            + progress.byID.keys.map { .saveRecord(Self.id(event: $0)) })
+        let ids = decks.decks.map { Self.id(deck: $0.id) } + progress.byID.keys.map { Self.id(event: $0) }
+        let missing = ids.filter { !onServer.contains($0.recordName) }
+        guard !missing.isEmpty else { return }
+        if onServer.isEmpty { engine.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: Self.zone))]) }
+        engine.state.add(pendingRecordZoneChanges: missing.map { .saveRecord($0) })
+    }
+
+    private func markOnServer(_ names: [String]) {
+        guard !names.isEmpty else { return }
+        onServer.formUnion(names)
+        try? JSONEncoder().encode(onServer).write(to: onServerFile)
     }
 
     // MARK: Records
@@ -105,27 +120,36 @@ import os
             case .switchAccounts, .signOut:
                 // Local data stays; it will upload to whichever account signs in next.
                 try? FileManager.default.removeItem(at: stateFile)
+                try? FileManager.default.removeItem(at: onServerFile)
+                onServer = []
             @unknown default: break
             }
         case .fetchedRecordZoneChanges(let f):
             apply(f.modifications.map(\.record), deleted: f.deletions.map(\.recordID))
+            markOnServer(f.modifications.map(\.record.recordID.recordName))
         case .sentRecordZoneChanges(let s):
+            markOnServer(s.savedRecords.map(\.recordID.recordName))
             for failure in s.failedRecordSaves {
                 switch failure.error.code {
                 case .serverRecordChanged:
                     if let server = failure.error.serverRecord { apply([server], deleted: []) }
+                    markOnServer([failure.record.recordID.recordName])
                 case .zoneNotFound:
                     engine.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: Self.zone))])
                     enqueue(.saveRecord(failure.record.recordID))
-                case .networkFailure, .networkUnavailable, .serviceUnavailable, .requestRateLimited, .zoneBusy:
+                case .batchRequestFailed, .networkFailure, .networkUnavailable, .serviceUnavailable, .requestRateLimited, .zoneBusy:
                     enqueue(.saveRecord(failure.record.recordID))
                 default:
-                    Self.log.error("save \(failure.record.recordID.recordName): \(failure.error)")
+                    Self.log.error("save \(failure.record.recordID.recordName, privacy: .public): \(failure.error, privacy: .public)")
                 }
             }
         case .fetchedDatabaseChanges(let f):
             // The zone was deleted elsewhere (e.g. iCloud data reset): upload everything again.
-            if f.deletions.contains(where: { $0.zoneID == Self.zone }) { enqueueAll() }
+            if f.deletions.contains(where: { $0.zoneID == Self.zone }) {
+                onServer = []
+                try? FileManager.default.removeItem(at: onServerFile)
+                enqueueAll()
+            }
         default: break
         }
     }
