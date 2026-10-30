@@ -12,78 +12,6 @@ enum Level: Int, CaseIterable, Identifiable {
 
 enum Route: Hashable { case numbers, overview(Deck), study(Deck), free(Deck) }
 
-@main
-struct LexikosApp: App {
-    @State private var store = DeckStore()
-    @State private var progress = ProgressStore()
-    @State private var updater = Updater()
-    @AppStorage("lang") private var lang = AppLanguage.zh
-    @AppStorage("appearance") private var appearance = Appearance.system.rawValue
-
-    init() {
-        if CommandLine.arguments.contains("--dump") {
-            for n in 0...9999 { let e = FrenchNumbers.entry(n); print("\(n)\t\(e.word)\t/\(e.ipa)/") }
-            exit(0)
-        }
-        if CommandLine.arguments.contains("--parse") {
-            for d in DeckStore().decks { for c in d.cards {
-                let p = CardParts(c)
-                print("\(p.front) [\(p.tag ?? "")] → \(p.answer) | \(p.sections.map { "\($0.id)(\($0.items.count))" }.joined(separator: ", "))")
-                for sec in p.sections { for it in sec.items { print("   \(sec.id): \(it.fr.map { "FR[\($0)] EN[\(it.gloss ?? "")]" } ?? "TXT[\(it.text)]")") } }
-            } }
-            exit(0)
-        }
-        if let i = CommandLine.arguments.firstIndex(of: "--snapshot"), i + 1 < CommandLine.arguments.count {
-            Snapshot.run(to: URL(fileURLWithPath: CommandLine.arguments[i + 1]))
-            exit(0)
-        }
-        if let i = CommandLine.arguments.firstIndex(of: "--verify-signature"), i + 1 < CommandLine.arguments.count {
-            print(MainActor.assumeIsolated { Updater.signedByUs(URL(fileURLWithPath: CommandLine.arguments[i + 1])) } ? "trusted" : "rejected")
-            exit(0)
-        }
-        if let i = CommandLine.arguments.firstIndex(of: "--preview"), i + 1 < CommandLine.arguments.count {
-            let cards = (try? Importer.anki(URL(fileURLWithPath: CommandLine.arguments[i + 1]))) ?? []
-            print(cards.count, "cards")
-            for c in cards.prefix(Int(CommandLine.arguments.last!) ?? 4) {
-                let p = CardParts(c)
-                print("── \(p.front) [\(p.tag ?? "")] /\(p.hint)/ → \(p.answer)")
-                for s in p.sections { for it in s.items { print("     \(s.id): \(it.fr ?? it.text)  ⟶ \(it.gloss ?? "")") } }
-            }
-            exit(0)
-        }
-        if let i = CommandLine.arguments.firstIndex(of: "--reimport"), i + 2 < CommandLine.arguments.count {
-            do {
-                try DeckStore().reimport(UUID(uuidString: CommandLine.arguments[i + 1])!, from: URL(fileURLWithPath: CommandLine.arguments[i + 2]))
-                print("reimported")
-            } catch { print("failed: \(error)") }
-            exit(0)
-        }
-        if let i = CommandLine.arguments.firstIndex(of: "--import"), i + 1 < CommandLine.arguments.count {
-            do { try DeckStore().importFile(URL(fileURLWithPath: CommandLine.arguments[i + 1])); print("imported") }
-            catch { print("failed: \(error)") }
-            exit(0)
-        }
-    }
-
-    var body: some Scene {
-        WindowGroup("Lexikos") {
-            RootView()
-                .environment(\.locale, Locale(identifier: lang.rawValue))
-                .environment(store)
-                .environment(progress)
-                .environment(updater)
-                .task { await updater.checkIfDue() }
-                .frame(minWidth: 480, minHeight: 520)
-                .onAppear { (Appearance(rawValue: appearance) ?? .system).apply() }
-                .onChange(of: appearance) { (Appearance(rawValue: appearance) ?? .system).apply() }
-        }
-        .windowStyle(.hiddenTitleBar)
-        .defaultSize(width: 820, height: 600)
-
-        Settings { SettingsView().environment(updater).padding(24).frame(width: 460) }
-    }
-}
-
 struct RootView: View {
     @State private var route: Route?
 
@@ -115,8 +43,11 @@ struct HomeView: View {
     @Binding var route: Route?
     @Environment(DeckStore.self) private var store
     @Environment(ProgressStore.self) private var progress
+    #if os(macOS)
     @Environment(Updater.self) private var updater
+    #endif
     @AppStorage("newPerDay") private var newPerDay = 20
+    @AppStorage("groupSize") private var groupSize = 10
     @AppStorage("startDeck") private var startDeck = ""
     @Environment(\.windowSize) private var size
     @AppStorage("lang") private var lang = AppLanguage.zh
@@ -136,7 +67,7 @@ struct HomeView: View {
                 Text(l["home.subtitle"]).font(.system(size: 13)).foregroundStyle(Color.muted)
                 Spacer()
                 Button { showSettings = true } label: {
-                    Image(systemName: "gearshape").font(.system(size: 15))
+                    Image(systemName: "gearshape").font(.system(size: 15)).touchTarget(.trailing)
                 }
                 .buttonStyle(.plain).foregroundStyle(Color.muted).help(l["settings"])
             }
@@ -144,7 +75,9 @@ struct HomeView: View {
 
             PageScroll {
                 VStack(alignment: .leading, spacing: 24) {
+                    #if os(macOS)
                     UpdateBanner(l: l, accent: accent)
+                    #endif
                     todaySummary
                     section(l["builtin"]) {
                         DeckTile(title: l["numbers.name"], detail: l["numbers.desc"], glyph: "123", accent: accent) {
@@ -153,10 +86,16 @@ struct HomeView: View {
                     }
                     section(l["imported"]) {
                         ForEach(store.decks) { deck in
-                            let p = progress.plan(deck, newPerDay: newPerDay)
+                            let p = progress.plan(deck, newPerDay: newPerDay, groupSize: groupSize)
+                            let detailText: String = {
+                                if p.groupQueue.isEmpty { return "\(deck.cards.count) \(l["cards"]) · \(l["today.clear"])" }
+                                if !p.due.isEmpty {
+                                    return "\(l["review"]) \(p.due.count) · \(l["group.nextInfo"]) \(p.groupQueue.count) \(l["group.words"])"
+                                }
+                                return "\(l["group.nextInfo"])：\(l["new"]) \(p.groupNew.count) · \(l["stat.unseen"]) \(p.unseenCount)"
+                            }()
                             DeckTile(title: deck.name.replacingOccurrences(of: "_", with: " "),
-                                     detail: p.due.isEmpty && p.new.isEmpty ? "\(deck.cards.count) \(l["cards"]) · \(l["today.clear"])"
-                                         : "\(l["review"]) \(p.due.count) · \(l["new"]) \(p.new.count)",
+                                     detail: detailText,
                                      glyph: deck.glyph, accent: accent) {
                                 route = .overview(deck)
                             }
@@ -173,27 +112,27 @@ struct HomeView: View {
         }
         .frame(maxWidth: 1200)
         .frame(maxWidth: .infinity)
-        .padding(.horizontal, size.gutter).padding(.top, 40)
+        .padding(.horizontal, size.gutter).padding(.top, size.top)
         .fileImporter(isPresented: $importing, allowedContentTypes: [UTType(filenameExtension: "apkg") ?? .data,
                                                                      .commaSeparatedText, .tabSeparatedText, .plainText]) { result in
             guard case .success(let url) = result else { return }
             let target = reimportTarget
             reimportTarget = nil
-            do {
-                if let target {
-                    let scoped = url.startAccessingSecurityScopedResource()
-                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                    try store.reimport(target, from: url)
-                } else { try store.importFile(url) }
-            } catch let e as ImportError {
-                error = l[["anki21b": "err.anki21b", "empty": "err.empty"]["\(e)"] ?? "err.unreadable"]
-            } catch { self.error = l["err.unreadable"] }
+            load(url, into: target)
+        }
+        // A deck shared to Lexikos from Files, AirDrop, Mail…
+        // …or lexikos://study from a widget.
+        .onOpenURL { url in
+            guard url.scheme == "lexikos" else { return load(url, into: nil) }
+            if url.host == "study", let d = store.decks.first(where: { $0.id.uuidString == startDeck }) ?? store.decks.first {
+                route = .study(d)
+            }
         }
         .alert(l["import.failed"], isPresented: .constant(error != nil)) {
             Button(l["ok"]) { error = nil }
         } message: { Text(error ?? "") }
         .sheet(isPresented: $showSettings) {
-            SettingsView().environment(updater).padding(28).frame(width: 460)
+            settings
                 .overlay(alignment: .topTrailing) {
                     Button { showSettings = false } label: { Image(systemName: "xmark") }
                         .buttonStyle(.plain).foregroundStyle(Color.muted).padding(16)
@@ -202,8 +141,28 @@ struct HomeView: View {
         }
     }
 
+    private func load(_ url: URL, into target: UUID?) {
+        do {
+            if let target {
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                try store.reimport(target, from: url)
+            } else { try store.importFile(url) }
+        } catch let e as ImportError {
+            error = l[["anki21b": "err.anki21b", "empty": "err.empty"]["\(e)"] ?? "err.unreadable"]
+        } catch { self.error = l["err.unreadable"] }
+    }
+
+    private var settings: some View {
+        #if os(macOS)
+        SettingsView().environment(updater).padding(28).frame(width: 460)
+        #else
+        SettingsView().padding(28).presentationBackground(Color.bg)
+        #endif
+    }
+
     private var todaySummary: some View {
-        let plans = store.decks.map { progress.plan($0, newPerDay: newPerDay) }
+        let plans = store.decks.map { progress.plan($0, newPerDay: newPerDay, groupSize: groupSize) }
         let due = plans.map(\.due.count).reduce(0, +), new = plans.map(\.new.count).reduce(0, +)
         let done = plans.map(\.learnedToday).reduce(0, +)
         let heading = VStack(alignment: .leading, spacing: 4) {
@@ -240,7 +199,7 @@ struct HomeView: View {
     /// Deck chooser + start button. The chooser is a menu dressed as a deck row, not a system pop-up.
     @ViewBuilder private var startPanel: some View {
         if let chosen = store.decks.first(where: { $0.id.uuidString == startDeck }) ?? store.decks.first {
-            let p = progress.plan(chosen, newPerDay: newPerDay)
+            let p = progress.plan(chosen, newPerDay: newPerDay, groupSize: groupSize)
             VStack(spacing: 10) {
                 Menu {
                     ForEach(store.decks) { d in
@@ -257,7 +216,7 @@ struct HomeView: View {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(chosen.name.replacingOccurrences(of: "_", with: " "))
                                 .font(.system(size: 13, weight: .medium)).foregroundStyle(Color.ink).lineLimit(1).truncationMode(.middle)
-                            Text("\(l["review"]) \(p.due.count) · \(l["new"]) \(p.new.count)")
+                            Text("\(l["group.nextInfo"])：\(l["review"]) \(p.groupDue.count) · \(l["new"]) \(p.groupNew.count)")
                                 .font(.system(size: 11)).foregroundStyle(Color.muted)
                         }
                         Spacer(minLength: 4)
@@ -272,12 +231,14 @@ struct HomeView: View {
                 .help(l["start.from"])
 
                 Button { route = .study(chosen) } label: {
-                    Label(l["start.go"], systemImage: "play.fill").font(.system(size: 13, weight: .semibold))
+                    let btnText = p.due.isEmpty && p.learnedToday > 0 ? l["start.nextGroup"] : l["start.group"]
+                    Label(btnText, systemImage: "play.fill").font(.system(size: 13, weight: .semibold))
                         .frame(maxWidth: .infinity).padding(.vertical, 9)
                         .background(RoundedRectangle(cornerRadius: 10).fill(accent.color)).foregroundStyle(Color.bg)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain).focusable(false)
+                .disabled(p.groupQueue.isEmpty).opacity(p.groupQueue.isEmpty ? 0.4 : 1)
             }
         }
     }
@@ -347,8 +308,10 @@ struct SettingsView: View {
     @AppStorage("appearance") private var appearance = Appearance.system
     @AppStorage("accent") private var accent = Accent.sage
     @AppStorage("newPerDay") private var newPerDay = 20
+    @AppStorage("groupSize") private var groupSize = 10
     @AppStorage("autoSpeak") private var autoSpeak = true
     private static let presets = [5, 10, 20, 30, 50]
+    private static let groupPresets = [5, 10, 15, 20, 30]
     private var l: L { L(lang: lang) }
 
     var body: some View {
@@ -366,6 +329,21 @@ struct SettingsView: View {
                 Picker("", selection: $autoSpeak) { Text(l["on"]).tag(true); Text(l["off"]).tag(false) }
                     .pickerStyle(.segmented).labelsHidden()
             }
+            row(l["group.size"]) {
+                HStack(spacing: 12) {
+                    Picker("", selection: Binding(get: { Self.groupPresets.contains(groupSize) ? groupSize : -1 },
+                                                  set: { if $0 > 0 { groupSize = $0 } })) {
+                        ForEach(Self.groupPresets, id: \.self) { Text("\($0)").tag($0) }
+                        Text(l["custom"]).tag(-1)
+                    }
+                    .pickerStyle(.segmented).labelsHidden()
+                    HStack(spacing: 4) {
+                        TextField("", value: Binding(get: { groupSize }, set: { groupSize = min(200, max(1, $0)) }), format: .number)
+                            .textFieldStyle(.roundedBorder).frame(width: 52).multilineTextAlignment(.trailing)
+                        Stepper("", value: $groupSize, in: 1...200).labelsHidden()
+                    }
+                }
+            }
             row(l["newPerDay"]) {
                 HStack(spacing: 12) {
                     Picker("", selection: Binding(get: { Self.presets.contains(newPerDay) ? newPerDay : -1 },
@@ -381,7 +359,9 @@ struct SettingsView: View {
                     }
                 }
             }
+            #if os(macOS)
             row(l["update"]) { UpdateSettings(l: l) }
+            #endif
             row(l["accent"]) {
                 HStack(spacing: 12) {
                     ForEach(Accent.allCases) { a in

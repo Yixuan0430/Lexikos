@@ -38,7 +38,7 @@ struct CardParts {
             .replacingOccurrences(of: "([.?!][”\"»])(?=\\s*[A-ZÀ-ÖØ-Þ])", with: "$1\n", options: .regularExpression)
             .replacingOccurrences(of: "(?<=[^\\d\\s])(?=\\d+\\.\\s)", with: "\n", options: .regularExpression) // "dressed.2. Je…"
             .replacingOccurrences(of: "(?<=[a-zà-ÿ])(?=[A-ZÀ-ÖØ-Þ][a-zà-ÿ])", with: "\n", options: .regularExpression)
-            .replacingOccurrences(of: "(?<=\\S)(?=(\(CardParts.headerPattern))\\s*:)", with: "\n",
+            .replacingOccurrences(of: "(?<=[^\\s(])(?=(\(CardParts.headerPattern))\\s*:)", with: "\n",
                                   options: [.regularExpression, .caseInsensitive])
 
         // Raw blocks: (header title or nil, lines)
@@ -123,13 +123,24 @@ struct CardParts {
     }
 
     static func items(_ lines: [String]) -> [Item] {
+        // Rejoin lines where a parenthetical translation/note was split across a newline.
+        var merged: [String] = []
+        for line in lines {
+            if let last = merged.last,
+               last.filter({ $0 == "(" }).count > last.filter({ $0 == ")" }).count,
+               line.filter({ $0 == ")" }).count > line.filter({ $0 == "(" }).count {
+                merged[merged.count - 1] = "\(last) \(line)"
+            } else {
+                merged.append(line)
+            }
+        }
         var out: [Item] = [], i = 0
-        while i < lines.count {
-            var item = pair(lines[i])
+        while i < merged.count {
+            var item = pair(merged[i])
             // French line followed by its English translation on the next line.
-            if item.fr != nil, item.gloss == nil, i + 1 < lines.count,
-               pair(lines[i + 1]).fr == nil, lang(lines[i + 1]) == .english {
-                item.gloss = lines[i + 1]; i += 1
+            if item.fr != nil, item.gloss == nil, i + 1 < merged.count,
+               pair(merged[i + 1]).fr == nil, lang(merged[i + 1]) == .english {
+                item.gloss = merged[i + 1]; i += 1
             }
             out.append(item); i += 1
         }

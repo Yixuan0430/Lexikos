@@ -1,6 +1,6 @@
 #!/bin/sh
-# Build Lexikos.app. Usage: ./bundle.sh            (local, ad-hoc signed, this Mac's arch)
-#                           ./bundle.sh release    (universal, Developer ID signed, hardened runtime)
+# Quick Mac build without Xcode (no iCloud sync). Usage: ./bundle.sh            (local, ad-hoc signed, this Mac's arch)
+#                                                     ./bundle.sh release    (universal, Developer ID signed, hardened runtime)
 set -e
 VERSION=1.0.0
 APP=build/Lexikos.app
@@ -20,7 +20,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <plist version="1.0"><dict>
 <key>CFBundleName</key><string>Lexikos</string>
 <key>CFBundleDisplayName</key><string>Lexikos</string>
-<key>CFBundleIdentifier</key><string>local.lexikos</string>
+<key>CFBundleIdentifier</key><string>com.yixuanwu.lexikos</string>
 <key>CFBundleExecutable</key><string>Lexikos</string>
 <key>CFBundleIconFile</key><string>Lexikos</string>
 <key>CFBundlePackageType</key><string>APPL</string>

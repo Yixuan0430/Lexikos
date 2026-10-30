@@ -7,7 +7,11 @@ import SwiftUI
         for size in [CGSize(width: 520, height: 640), CGSize(width: 820, height: 600), CGSize(width: 1400, height: 900)] {
             let pages: [(String, AnyView)] = [
                 ("home", AnyView(HomeView(route: .constant(nil)))),
-            ] + store.decks.prefix(1).map { ("overview", AnyView(OverviewView(deck: $0, route: .constant(nil)))) }
+            ] + store.decks.prefix(1).flatMap { d in [
+                ("overview", AnyView(OverviewView(deck: d, route: .constant(nil)))),
+                ("free-setup", AnyView(PracticeView(source: .free(d), route: .constant(nil)))),
+                ("study", AnyView(PracticeView(source: .study(d), route: .constant(nil)))),
+            ] }
             for (name, page) in pages {
                 let view = ZStack { Color.bg; page }
                     .environment(\.windowSize, size).environment(\.snapshotting, true).environment(store).environment(progress).environment(Updater())
@@ -20,23 +24,5 @@ import SwiftUI
                 }
             }
         }
-    }
-}
-
-private struct SnapshotKey: EnvironmentKey { static let defaultValue = false }
-extension EnvironmentValues {
-    var snapshotting: Bool {
-        get { self[SnapshotKey.self] }
-        set { self[SnapshotKey.self] = newValue }
-    }
-}
-
-/// A vertical ScrollView, except while snapshotting (ImageRenderer cannot draw scroll views).
-struct PageScroll<Content: View>: View {
-    @Environment(\.snapshotting) private var snapshotting
-    @ViewBuilder var content: Content
-    var body: some View {
-        if snapshotting { VStack { content; Spacer(minLength: 0) } }
-        else { ScrollView { content }.scrollIndicators(.never) }
     }
 }

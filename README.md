@@ -60,7 +60,7 @@ Une app macOS paisible pour apprendre le vocabulaire français — cartes, rép�
 
 ### 数据与隐私
 
-所有内容都保存在本机 `~/Library/Application Support/Lexikos/`（`decks/` 词库、`progress/` 学习记录），不上传任何数据。唯一的联网是检查更新：最多每 12 小时向 GitHub 查询一次最新版本，可在设置里关闭。词库右键「重新导入」可以更新内容并保留学习进度。
+词库和学习记录保存在本机 `~/Library/Application Support/Lexikos/`（`decks/` 词库、`progress/` 学习记录），并通过你自己的 iCloud 私有数据库在 Mac 和 iPhone 之间同步（需登录 iCloud）；开发者看不到这些数据，也没有任何统计上报。Mac 版另外会检查更新：最多每 12 小时向 GitHub 查询一次最新版本，可在设置里关闭。词库右键「重新导入」可以更新内容并保留学习进度。
 
 ### 自动更新
 
@@ -106,7 +106,7 @@ Quand une nouvelle version paraît, un bandeau sur l’accueil propose *Mettre �
 
 ### Données et confidentialité
 
-Tout reste sur votre Mac dans `~/Library/Application Support/Lexikos/` (`decks/`, `progress/`). Aucun compte, aucune télémétrie. La seule requête réseau est la vérification des mises à jour sur GitHub Releases, au plus toutes les 12 heures ; elle peut être désactivée dans les Réglages.
+Les paquets et la progression sont enregistrés dans `~/Library/Application Support/Lexikos/` (`decks/`, `progress/`) et synchronisés entre Mac et iPhone par votre base iCloud privée (session iCloud requise) ; le développeur n’y a pas accès. Aucune télémétrie. Sur Mac, Lexikos vérifie aussi les mises à jour sur GitHub Releases, au plus toutes les 12 heures ; c’est désactivable dans les Réglages.
 
 ---
 
@@ -133,19 +133,23 @@ Download `Lexikos-<version>.dmg` from [Releases](../../releases/latest), open it
 
 ### Build from source
 
-Requires Xcode 16 or later (Swift 5.9+), macOS 14+.
+Requires Xcode 16 or later (Swift 5.9+), macOS 14+ / iOS 17+, and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
 
 ```sh
-./bundle.sh            # build/Lexikos.app for this Mac, ad-hoc signed
-./bundle.sh release    # universal, Developer ID signed, hardened runtime
-./release.sh           # signed + notarized dmg in dist/
+xcodegen generate      # Lexikos.xcodeproj with the Lexikos-macOS and Lexikos-iOS targets (from project.yml)
+./release.sh           # Mac: Developer ID signed + notarized dmg in dist/, with iCloud sync
+./release-ios.sh       # iPhone: archive and upload to TestFlight
+./bundle.sh            # quick Mac build with SwiftPM only; no iCloud sync
+swift test             # scheduler, review log and import tests
 ```
 
-`release.sh` notarizes with the keychain profile named in `NOTARY_PROFILE` (default `lexikos-notary`), created with `xcrun notarytool store-credentials`.
+`release.sh` notarizes with the keychain profile named in `NOTARY_PROFILE` (default `lexikos-notary`), created with `xcrun notarytool store-credentials`. Both apps use the bundle id `com.yixuanwu.lexikos` and the CloudKit container `iCloud.com.yixuanwu.lexikos` (team BGM8P5U985). Before the first public release, deploy the CloudKit schema to Production in the CloudKit Console.
 
 ### Data & privacy
 
-Everything stays on your Mac in `~/Library/Application Support/Lexikos/` (`decks/`, `progress/`). No accounts, no telemetry. The only network request is the update check against GitHub Releases, at most every 12 hours; it can be turned off in Settings.
+Decks and progress live in `~/Library/Application Support/Lexikos/` (`decks/`, `progress/`) and sync between Mac and iPhone through your own private iCloud database (requires being signed in to iCloud); the developer cannot see them. No telemetry. The Mac app also checks GitHub Releases for updates, at most every 12 hours; this can be turned off in Settings.
+
+Progress is stored as an append-only log of review events (`progress/<deck>.jsonl`), and card states are replayed from it, so reviews made on several devices — even offline — merge without conflicts. Language, daily new-word count and group size sync through iCloud key-value storage; appearance and accent stay per device.
 
 ### Updates
 
@@ -158,11 +162,13 @@ When a newer release exists, a banner on the home page offers *Update & restart*
 | `FrenchNumbers.swift` | Spelling and IPA for 0–9999 |
 | `AnkiImport.swift`, `Decks.swift` | Anki / CSV import, deck storage |
 | `CardLayout.swift` | Splits a card into answer, tag and categorised notes |
-| `Memory.swift` | Forgetting curve, scheduler, daily plan |
+| `Memory.swift` | Forgetting curve, scheduler, review-event log, daily plan |
+| `Sync.swift`, `CloudSync.swift` | iCloud sync (CKSyncEngine) of decks, review events and settings |
 | `Speaker.swift` | Speech with real slow-down (time-stretch) |
 | `PracticeView.swift`, `OverviewView.swift`, `LexikosApp.swift` | Study, statistics and home screens |
 | `Theme.swift` | Palette, accents and UI strings (zh / en / fr) |
-| `Updater.swift` | Update check, download, signature check and install |
+| `macOS/` | Mac entry point, `Updater.swift` (update check, download, signature check, install), snapshot tool |
+| `iOS/` | iPhone / iPad entry point |
 | `scripts/make-icon.swift` | Draws the app icon |
 
 ## License

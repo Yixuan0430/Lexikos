@@ -3,7 +3,11 @@ import SwiftUI
 // Palette after Synaxos: sage paper neutrals, Didot display, swappable accent.
 extension Color {
     static func dyn(_ light: UInt32, _ dark: UInt32) -> Color {
+        #if os(macOS)
         Color(NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(hex: dark) : NSColor(hex: light) })
+        #else
+        Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: dark) : UIColor(hex: light) })
+        #endif
     }
     static let bg = dyn(0xF3F6F4, 0x121615)
     static let panel = dyn(0xFBFCFB, 0x181D1C)
@@ -12,10 +16,27 @@ extension Color {
     static let line = dyn(0xDDE5E1, 0x2C3533)
 }
 
-extension NSColor {
+#if os(macOS)
+typealias PlatformColor = NSColor
+#else
+typealias PlatformColor = UIColor
+#endif
+
+extension PlatformColor {
     convenience init(hex: UInt32) {
-        self.init(srgbRed: CGFloat(hex >> 16 & 0xFF) / 255, green: CGFloat(hex >> 8 & 0xFF) / 255,
+        self.init(red: CGFloat(hex >> 16 & 0xFF) / 255, green: CGFloat(hex >> 8 & 0xFF) / 255,
                   blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
+    }
+}
+
+extension View {
+    /// Apple's minimum 44 pt hit area for small text buttons on touch screens; no change on the Mac.
+    func touchTarget(_ alignment: Alignment = .center) -> some View {
+        #if os(iOS)
+        frame(minWidth: 44, minHeight: 44, alignment: alignment).contentShape(Rectangle())
+        #else
+        self
+        #endif
     }
 }
 
@@ -33,6 +54,16 @@ extension CGSize {
     /// Side margin: tight on narrow windows, wider on large ones.
     var gutter: CGFloat { width < 640 ? 20 : width < 1100 ? 36 : 56 }
     var compact: Bool { width < 760 }
+    /// Phone-width layout: tighter headers.
+    var narrow: Bool { width < 500 }
+    /// Space above page content; on iOS the safe area already clears the status bar.
+    var top: CGFloat {
+        #if os(iOS)
+        8
+        #else
+        40
+        #endif
+    }
     /// Type scale for the practice card, relative to the default 820×600 window.
     var cardScale: CGFloat { min(1.5, max(0.72, min(width / 820, height / 600))) }
 }
@@ -57,6 +88,9 @@ enum Accent: String, CaseIterable, Identifiable {
 enum Appearance: String, CaseIterable, Identifiable {
     case system, light, dark
     var id: String { rawValue }
+    var scheme: ColorScheme? { [.system: nil, .light: .light, .dark: .dark][self]! }
+    #if os(macOS)
+    /// Applied app-wide so sheets and menus follow too.
     func apply() {
         NSApp.appearance = switch self {
         case .system: nil
@@ -64,6 +98,7 @@ enum Appearance: String, CaseIterable, Identifiable {
         case .dark: NSAppearance(named: .darkAqua)
         }
     }
+    #endif
 }
 
 enum AppLanguage: String, CaseIterable, Identifiable {
@@ -85,12 +120,32 @@ struct L {
         "grade.forgot": ["zh": "没记住", "en": "Forgot", "fr": "Oublié"],
         "grade.vague": ["zh": "模糊", "en": "Vague", "fr": "Flou"],
         "grade.remembered": ["zh": "记住了", "en": "Knew it", "fr": "Su"],
-        "again.soon": ["zh": "稍后再现", "en": "Again soon", "fr": "Bientôt"],
+        "again.soon": ["zh": "本组重现", "en": "In this group", "fr": "Ce groupe"],
+        "unit.mins": ["zh": "分钟后", "en": "min", "fr": "min"],
         "unit.hours": ["zh": "小时后", "en": "h", "fr": "h"],
         "unit.days": ["zh": "天后", "en": "days", "fr": "j"],
         "unit.months": ["zh": "个月后", "en": "months", "fr": "mois"],
         "unit.d": ["zh": "天", "en": "d", "fr": "j"],
         "done.title": ["zh": "今天的任务完成了", "en": "All done for today", "fr": "Terminé pour aujourd’hui"],
+        "group.done": ["zh": "本组学习完成", "en": "Group complete", "fr": "Groupe terminé"],
+        "group.next": ["zh": "学习下一组", "en": "Study next group", "fr": "Groupe suivant"],
+        "group.next.new": ["zh": "再学一组新词", "en": "Next group of new words", "fr": "Nouveau groupe"],
+        "group.size": ["zh": "每组词数", "en": "Words per group", "fr": "Mots par groupe"],
+        "group.per": ["zh": "每组", "en": "Group", "fr": "Groupe"],
+        "group.words": ["zh": "词", "en": "words", "fr": "mots"],
+        "group.label": ["zh": "本组", "en": "Group", "fr": "Groupe"],
+        "group.nextInfo": ["zh": "下一组", "en": "Next group", "fr": "Prochain groupe"],
+        "group.reviewsClear": ["zh": "待复习已全部清零，可继续按组学习新词", "en": "All due reviews cleared; continue with new word groups anytime", "fr": "Révisions à jour ; continuez par groupes de nouveaux mots"],
+        "start.group": ["zh": "开始本组学习", "en": "Start group", "fr": "Commencer le groupe"],
+        "start.nextGroup": ["zh": "再学一组", "en": "Study another group", "fr": "Encore un groupe"],
+        "free.setup.title": ["zh": "自由练习", "en": "Free practice", "fr": "Entraînement libre"],
+        "free.setup.sub": ["zh": "设置本次练习随机抽取的单词数量", "en": "Choose how many random words to practice this session", "fr": "Choisissez le nombre de mots pour cette séance"],
+        "free.count": ["zh": "本次练习词数", "en": "Words to practice", "fr": "Nombre de mots"],
+        "free.all": ["zh": "全部", "en": "All", "fr": "Tout"],
+        "free.start": ["zh": "开始自由练习", "en": "Start practice", "fr": "Commencer"],
+        "free.done.title": ["zh": "本次自由练习完成", "en": "Free practice complete", "fr": "Séance libre terminée"],
+        "free.again": ["zh": "再来一轮（重设数量）", "en": "Practice again (set count)", "fr": "Recommencer (choisir le nombre)"],
+        "relearn.badge": ["zh": "本组巩固", "en": "Relearning", "fr": "Consolidation"],
         "back.overview": ["zh": "查看记忆曲线", "en": "See memory curve", "fr": "Voir la courbe"],
         "free": ["zh": "自由练习", "en": "Free practice", "fr": "Entraînement libre"],
         "start": ["zh": "开始今日学习", "en": "Start today", "fr": "Commencer"],
