@@ -237,6 +237,7 @@ extension Deck {
 @Observable final class ProgressStore {
     private(set) var events: [UUID: [ReviewEvent]] = [:]
     private var replayed: [UUID: [String: CardState]] = [:]
+    @ObservationIgnored private(set) var byID: [UUID: ReviewEvent] = [:]
     /// Called for every event recorded on this device (the sync engine uploads them).
     @ObservationIgnored var onRecord: ((ReviewEvent) -> Void)?
     private let dir: URL
@@ -253,6 +254,7 @@ extension Deck {
                   let text = try? String(contentsOf: f, encoding: .utf8) else { continue }
             events[id] = text.split(separator: "\n").compactMap { try? JSONDecoder().decode(ReviewEvent.self, from: Data($0.utf8)) }
             replayed[id] = ReviewEvent.replay(events[id]!)
+            for e in events[id]! { byID[e.id] = e }
         }
     }
 
@@ -283,6 +285,7 @@ extension Deck {
             let fresh = batch.filter { !known.contains($0.id) }
             guard !fresh.isEmpty else { continue }
             events[deck, default: []] += fresh
+            for e in fresh { byID[e.id] = e }
             append(fresh, deck: deck)
             replayed[deck] = ReviewEvent.replay(events[deck]!)
             added += fresh.count
@@ -292,6 +295,7 @@ extension Deck {
 
     private func record(_ e: ReviewEvent) {
         events[e.deck, default: []].append(e)
+        byID[e.id] = e
         append([e], deck: e.deck)
         // Replaying one event onto the current state equals a full replay unless it is older than the newest.
         if let last = events[e.deck]?.dropLast().max(by: <), !(last < e) {

@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct LexikosApp: App {
+    @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
     @State private var store = DeckStore()
     @State private var progress = ProgressStore()
     @State private var updater = Updater()
@@ -61,6 +62,7 @@ struct LexikosApp: App {
                 .environment(progress)
                 .environment(updater)
                 .task { await updater.checkIfDue() }
+                .cloudSync(decks: store, progress: progress)
                 .frame(minWidth: 480, minHeight: 520)
                 .onAppear { (Appearance(rawValue: appearance) ?? .system).apply() }
                 .onChange(of: appearance) { (Appearance(rawValue: appearance) ?? .system).apply() }
@@ -69,5 +71,12 @@ struct LexikosApp: App {
         .defaultSize(width: 820, height: 600)
 
         Settings { SettingsView().environment(updater).padding(24).frame(width: 460) }
+    }
+}
+
+/// CloudKit announces changes from other devices with silent pushes.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_: Notification) {
+        NSApplication.shared.registerForRemoteNotifications()
     }
 }

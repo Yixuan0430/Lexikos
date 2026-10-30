@@ -13,6 +13,7 @@ settings:
     GENERATE_INFOPLIST_FILE: YES
     INFOPLIST_KEY_CFBundleDisplayName: Lexikos
     INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.education
+    SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) CLOUDKIT"
 packages:
   ZIPFoundation: { url: https://github.com/weichsel/ZIPFoundation.git, exactVersion: 0.9.20 }
 targets:
@@ -33,7 +34,11 @@ targets:
         INFOPLIST_KEY_CFBundleIconFile: Lexikos
     entitlements:
       path: Config/Lexikos-macOS.entitlements
-      properties: {}
+      properties:
+        com.apple.developer.icloud-container-identifiers: [iCloud.com.yixuanwu.lexikos]
+        com.apple.developer.icloud-services: [CloudKit]
+        com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)com.yixuanwu.lexikos
+        com.apple.developer.aps-environment: development
   Lexikos-iOS:
     type: application
     platform: iOS
@@ -49,6 +54,14 @@ targets:
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+    info:
+      path: Config/Lexikos-iOS-Info.plist
+      properties:
+        UIBackgroundModes: [remote-notification]
     entitlements:
       path: Config/Lexikos-iOS.entitlements
-      properties: {}
+      properties:
+        com.apple.developer.icloud-container-identifiers: [iCloud.com.yixuanwu.lexikos]
+        com.apple.developer.icloud-services: [CloudKit]
+        com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)com.yixuanwu.lexikos
+        aps-environment: development

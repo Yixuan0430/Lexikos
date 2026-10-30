@@ -18,6 +18,9 @@ enum ImportError: Error { case anki21b, empty, unreadable }
 /// Imported decks, one JSON file each in Application Support.
 @Observable final class DeckStore {
     private(set) var decks: [Deck] = []
+    /// Called when this device adds, changes or deletes a deck (the sync engine uploads it).
+    @ObservationIgnored var onSave: ((Deck) -> Void)?
+    @ObservationIgnored var onDelete: ((UUID) -> Void)?
     private let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("Lexikos/decks", isDirectory: true)
 
@@ -38,6 +41,7 @@ enum ImportError: Error { case anki21b, empty, unreadable }
         let deck = Deck(name: url.deletingPathExtension().lastPathComponent, cards: cards)
         try JSONEncoder().encode(deck).write(to: file(deck))
         decks.append(deck)
+        onSave?(deck)
     }
 
     /// Re-read a deck's source file, keeping its id so study progress stays attached.
@@ -47,11 +51,27 @@ enum ImportError: Error { case anki21b, empty, unreadable }
         guard !cards.isEmpty else { throw ImportError.empty }
         decks[i].cards = cards
         try JSONEncoder().encode(decks[i]).write(to: file(decks[i]))
+        onSave?(decks[i])
     }
 
     func delete(_ deck: Deck) {
-        try? FileManager.default.removeItem(at: file(deck))
-        decks.removeAll { $0.id == deck.id }
+        remove(deck.id)
+        onDelete?(deck.id)
+    }
+
+    func deck(_ id: UUID) -> Deck? { decks.first { $0.id == id } }
+
+    /// Applies a deck from another device.
+    func upsert(_ deck: Deck) {
+        try? JSONEncoder().encode(deck).write(to: file(deck))
+        if let i = decks.firstIndex(where: { $0.id == deck.id }) { decks[i] = deck } else { decks.append(deck) }
+        decks.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    /// Removes a deck locally, as when another device deleted it.
+    func remove(_ id: UUID) {
+        try? FileManager.default.removeItem(at: dir.appendingPathComponent("\(id.uuidString).json"))
+        decks.removeAll { $0.id == id }
     }
 
     private func file(_ deck: Deck) -> URL { dir.appendingPathComponent("\(deck.id.uuidString).json") }
