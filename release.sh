@@ -1,10 +1,16 @@
 #!/bin/sh
-# Build a signed, notarized Lexikos-<version>.dmg in dist/.
-# Needs a "Developer ID Application" certificate and a notarytool keychain profile:
-#   xcrun notarytool store-credentials lexikos-notary --apple-id <id> --team-id <team>
+# Build a signed, notarized Lexikos-<version>.dmg in dist/, through Xcode so the CloudKit
+# provisioning profile is embedded. Needs XcodeGen, a "Developer ID Application" certificate
+# and a notarytool keychain profile:
+#   xcrun notarytool store-credentials lexikos-notary --apple-id <id> --team-id BGM8P5U985
 set -e
 PROFILE="${NOTARY_PROFILE:-lexikos-notary}"
-./bundle.sh release
+xcodegen generate -q
+rm -rf build/Lexikos.xcarchive build/Lexikos.app
+xcodebuild -project Lexikos.xcodeproj -scheme Lexikos-macOS -configuration Release \
+    -destination 'generic/platform=macOS' -archivePath build/Lexikos.xcarchive -allowProvisioningUpdates -quiet archive
+xcodebuild -exportArchive -archivePath build/Lexikos.xcarchive -exportOptionsPlist Config/ExportOptions-developer-id.plist \
+    -exportPath build -allowProvisioningUpdates -quiet
 VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" build/Lexikos.app/Contents/Info.plist)
 DMG="dist/Lexikos-$VERSION.dmg"
 mkdir -p dist && rm -f "$DMG"

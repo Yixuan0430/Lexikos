@@ -32,6 +32,10 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.yixuanwu.lexikos
         ENABLE_HARDENED_RUNTIME: YES
         INFOPLIST_KEY_CFBundleIconFile: Lexikos
+      configs:
+        # Developer ID builds talk to CloudKit's production environment.
+        Release:
+          CODE_SIGN_ENTITLEMENTS: Config/Lexikos-macOS-Release.entitlements
     entitlements:
       path: Config/Lexikos-macOS.entitlements
       properties:
