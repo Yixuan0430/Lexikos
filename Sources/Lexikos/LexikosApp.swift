@@ -67,7 +67,7 @@ struct HomeView: View {
                 Text(l["home.subtitle"]).font(.system(size: 13)).foregroundStyle(Color.muted)
                 Spacer()
                 Button { showSettings = true } label: {
-                    Image(systemName: "gearshape").font(.system(size: 15))
+                    Image(systemName: "gearshape").font(.system(size: 15)).touchTarget(.trailing)
                 }
                 .buttonStyle(.plain).foregroundStyle(Color.muted).help(l["settings"])
             }
@@ -112,22 +112,16 @@ struct HomeView: View {
         }
         .frame(maxWidth: 1200)
         .frame(maxWidth: .infinity)
-        .padding(.horizontal, size.gutter).padding(.top, 40)
+        .padding(.horizontal, size.gutter).padding(.top, size.top)
         .fileImporter(isPresented: $importing, allowedContentTypes: [UTType(filenameExtension: "apkg") ?? .data,
                                                                      .commaSeparatedText, .tabSeparatedText, .plainText]) { result in
             guard case .success(let url) = result else { return }
             let target = reimportTarget
             reimportTarget = nil
-            do {
-                if let target {
-                    let scoped = url.startAccessingSecurityScopedResource()
-                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                    try store.reimport(target, from: url)
-                } else { try store.importFile(url) }
-            } catch let e as ImportError {
-                error = l[["anki21b": "err.anki21b", "empty": "err.empty"]["\(e)"] ?? "err.unreadable"]
-            } catch { self.error = l["err.unreadable"] }
+            load(url, into: target)
         }
+        // A deck shared to Lexikos from Files, AirDrop, Mail…
+        .onOpenURL { load($0, into: nil) }
         .alert(l["import.failed"], isPresented: .constant(error != nil)) {
             Button(l["ok"]) { error = nil }
         } message: { Text(error ?? "") }
@@ -141,11 +135,23 @@ struct HomeView: View {
         }
     }
 
+    private func load(_ url: URL, into target: UUID?) {
+        do {
+            if let target {
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                try store.reimport(target, from: url)
+            } else { try store.importFile(url) }
+        } catch let e as ImportError {
+            error = l[["anki21b": "err.anki21b", "empty": "err.empty"]["\(e)"] ?? "err.unreadable"]
+        } catch { self.error = l["err.unreadable"] }
+    }
+
     private var settings: some View {
         #if os(macOS)
         SettingsView().environment(updater).padding(28).frame(width: 460)
         #else
-        SettingsView().padding(28)
+        SettingsView().padding(28).presentationBackground(Color.bg)
         #endif
     }
 

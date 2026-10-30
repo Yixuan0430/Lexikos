@@ -29,6 +29,17 @@ extension PlatformColor {
     }
 }
 
+extension View {
+    /// Apple's minimum 44 pt hit area for small text buttons on touch screens; no change on the Mac.
+    func touchTarget(_ alignment: Alignment = .center) -> some View {
+        #if os(iOS)
+        frame(minWidth: 44, minHeight: 44, alignment: alignment).contentShape(Rectangle())
+        #else
+        self
+        #endif
+    }
+}
+
 // MARK: Window-size adaptation
 
 private struct WindowSizeKey: EnvironmentKey { static let defaultValue = CGSize(width: 820, height: 600) }
@@ -43,6 +54,16 @@ extension CGSize {
     /// Side margin: tight on narrow windows, wider on large ones.
     var gutter: CGFloat { width < 640 ? 20 : width < 1100 ? 36 : 56 }
     var compact: Bool { width < 760 }
+    /// Phone-width layout: tighter headers.
+    var narrow: Bool { width < 500 }
+    /// Space above page content; on iOS the safe area already clears the status bar.
+    var top: CGFloat {
+        #if os(iOS)
+        8
+        #else
+        40
+        #endif
+    }
     /// Type scale for the practice card, relative to the default 820×600 window.
     var cardScale: CGFloat { min(1.5, max(0.72, min(width / 820, height / 600))) }
 }

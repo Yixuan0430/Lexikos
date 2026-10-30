@@ -12,6 +12,10 @@ final class Speaker {
     private var token = 0
 
     init() {
+        #if os(iOS)
+        // Speak even with the ring/silent switch on, like other language apps.
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: .duckOthers)
+        #endif
         engine.attach(player)
         engine.attach(stretch)
     }

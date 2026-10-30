@@ -20,7 +20,7 @@ struct OverviewView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Button { route = nil } label: { Label(l["back"], systemImage: "chevron.left").font(.system(size: 13)) }
+                Button { route = nil } label: { Label(l["back"], systemImage: "chevron.left").font(.system(size: 13)).touchTarget(.leading) }
                     .buttonStyle(.plain).focusable(false).foregroundStyle(Color.muted)
                 Spacer()
             }
@@ -42,7 +42,7 @@ struct OverviewView: View {
         }
         .frame(maxWidth: 1200)
         .frame(maxWidth: .infinity)
-        .padding(.horizontal, size.gutter).padding(.top, 40)
+        .padding(.horizontal, size.gutter).padding(.top, size.top)
         .sheet(item: Binding(get: { selected.map { IdentifiedInt(id: $0) } }, set: { selected = $0?.id })) { item in
             if deck.cards.indices.contains(item.id), let st = states[item.id] {
                 WordCurveSheet(card: deck.cards[item.id], state: st, accent: accent, l: l)

@@ -37,6 +37,7 @@ struct PracticeView: View {
     @State private var tally: [Grade: Int] = [:]
     @State private var finished = false
     @State private var groupIndex = 1
+    @State private var gradeTick = 0 // drives haptic feedback
 
     // Free practice setup state: asks user for word count before each free practice round.
     @State private var settingUpFree = false
@@ -60,7 +61,11 @@ struct PracticeView: View {
             } else if finished {
                 doneView
             } else {
+                #if os(iOS)
+                touchCard
+                #else
                 cardView
+                #endif
             }
             Spacer(minLength: 16)
             if isStudy && revealed && !finished && !settingUpFree {
@@ -68,7 +73,7 @@ struct PracticeView: View {
             }
             footer
         }
-        .padding(.horizontal, size.gutter).padding(.top, 40).padding(.bottom, 24)
+        .padding(.horizontal, size.gutter).padding(.top, size.top).padding(.bottom, 24)
         .focusable().focused($focused).focusEffectDisabled()
         .onAppear {
             focused = true
@@ -92,12 +97,30 @@ struct PracticeView: View {
         .onKeyPress(.escape) { goBack(); return .handled }
         .onKeyPress("s") { speak(); return .handled }
         .onKeyPress("d") { toggleDetails(); return .handled }
+        .sensoryFeedback(.impact(weight: .light), trigger: gradeTick)
+    }
+
+    /// Touch controls: tap the card to reveal or continue; once revealed, swipe right for
+    /// "remembered" and left for "forgot".
+    private var touchCard: some View {
+        cardView
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .onTapGesture { advance() }
+            .gesture(DragGesture(minimumDistance: 40).onEnded { v in
+                guard abs(v.translation.width) > abs(v.translation.height) * 2 else { return }
+                if isStudy && revealed && !learning {
+                    grade(v.translation.width > 0 ? .remembered : .forgot)
+                } else if !isStudy && v.translation.width < 0 {
+                    advance()
+                }
+            })
     }
 
     private var header: some View {
         HStack(spacing: 8) {
             Button(action: goBack) {
-                Label(l["back"], systemImage: "chevron.left").font(.system(size: 13))
+                Label(l["back"], systemImage: "chevron.left").font(.system(size: 13)).touchTarget(.leading)
             }
             .buttonStyle(.plain).focusable(false).foregroundStyle(Color.muted)
             Spacer()
@@ -106,20 +129,23 @@ struct PracticeView: View {
                     .pickerStyle(.segmented).labelsHidden().fixedSize()
                     .onChange(of: level) { next() }
             } else if let d = deck {
-                Text(d.name.replacingOccurrences(of: "_", with: " "))
-                    .font(.system(size: 13, weight: .medium)).foregroundStyle(Color.muted).lineLimit(1)
+                // On a phone the deck name gives way to the group counters.
+                if !(size.narrow && isStudy && !finished) {
+                    Text(d.name.replacingOccurrences(of: "_", with: " "))
+                        .font(.system(size: 13, weight: .medium)).foregroundStyle(Color.muted).lineLimit(1)
+                }
                 if isStudy && !finished {
                     let counts = groupCounts(d)
                     HStack(spacing: 10) {
-                        Text("· \(l["group.label"]) #\(groupIndex)")
-                            .font(.system(size: 12, weight: .medium)).foregroundStyle(Color.muted)
+                        Text("\(size.narrow ? "" : "· ")\(l["group.label"]) #\(groupIndex)")
+                            .font(.system(size: 12, weight: .medium)).foregroundStyle(Color.muted).fixedSize()
                         HStack(spacing: 8) {
                             badgeCount(counts.review, color: gradeColor(.remembered), help: l["review"])
                             badgeCount(counts.learning, color: gradeColor(.forgot), help: l["stat.learning"])
                             badgeCount(counts.new, color: accent.color, help: l["new"])
                         }
                         Text("(\(l["remaining"]) \(queue.count + (current == nil ? 0 : 1)))")
-                            .font(.system(size: 12)).foregroundStyle(Color.muted).monospacedDigit()
+                            .font(.system(size: 12)).foregroundStyle(Color.muted).monospacedDigit().fixedSize()
                     }
                 } else if isFree && !settingUpFree && !finished {
                     Text("· \(l["remaining"]) \(order.count + 1) / \(freeTotal)")
@@ -134,6 +160,7 @@ struct PracticeView: View {
             Circle().fill(color).frame(width: 6, height: 6)
             Text("\(n)").font(.system(size: 12, weight: .medium)).monospacedDigit().foregroundStyle(Color.ink)
         }
+        .fixedSize()
         .help(help)
     }
 
@@ -469,6 +496,7 @@ struct PracticeView: View {
         }
         // Always update CardState so Anki learning/relearning steps graduate properly when recalled.
         progress.grade(d, card: i, g)
+        gradeTick += 1
         if g == .forgot {
             queue.insert(i, at: min(4, queue.count))
         }
